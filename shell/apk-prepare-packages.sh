@@ -69,4 +69,21 @@ apk_fixname() {
 # sed 猜回来，所以这里直接读 PKGINFO 定名。已规范的幂等，不会动。
 apk_fixname "$TARGET_DIR"
 
+# 【v.187】官方 feed 也有的系统底层包，一律改用官方版本：run 包里若带同名库或内核
+# 模块（实测出现过 libopenssl3、libmbedtls21），进 packages/ 后 opkg 会优先挑中它，
+# 与官方 toolchain 编出的其它组件 ABI 不一致，表现为运行期缺符号或 opkg 依赖冲突。
+# 只清系统层，第三方插件一律不动 —— clashoo / ssr-plus / xray-core 这些即使官方 feed
+# 同名，也必须用 run 里的新版；按「官方有就删」的口径会把它们全部退回旧版。
+SYS_PKG_RE='^(libc|libgcc|libopenssl[0-9]*|libmbedtls[0-9]*|libwolfssl[0-9]*|libustream-[a-z0-9]+|libjson-c[0-9]*|liblua[0-9.]*|zlib|musl[a-z0-9.+_-]*|kernel|kmod-[a-z0-9-]+|base-files)$'
+for _f in "$TARGET_DIR"/*.apk; do
+  [ -e "$_f" ] || continue
+  _pn=$(tar -xzOf "$_f" .PKGINFO 2>/dev/null | sed -n 's/^pkgname[[:space:]]*=[[:space:]]*//p' | head -n1)
+  [ -n "$_pn" ] || _pn=$(basename "$_f" .apk)
+  if echo "$_pn" | grep -Eq "$SYS_PKG_RE"; then
+    rm -f "$_f"
+    echo "删除系统包（改用官方 feed 版本）: $(basename "$_f")"
+  fi
+done
+
+
 echo "✅ 所有 .apk 文件已整理至 $TARGET_DIR/"
