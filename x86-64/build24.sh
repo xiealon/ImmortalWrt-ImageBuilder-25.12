@@ -28,21 +28,51 @@ for _cf in /home/build/immortalwrt/custom/*; do
 done
 
 if [ -z "$CUSTOM_PACKAGES" ]; then
-  echo "⚠️ 未选择 任何第三方软件包"
+  echo "⚪️ 未选择 任何第三方软件包"
 else
-  # ============= 同步第三方插件库 =============
-  # 同步第三方软件包仓库 run/ipk（fork 自 wukongdaily/store）
-  echo "🔄 正在同步第三方软件包仓库 Cloning run file repo..."
-  git clone --depth=1 https://github.com/xiealon/store.git /tmp/store-run-repo \
-      || { echo "::error::clone xiealon/store 失败，检查 GitHub 可达性"; exit 1; }
+  # 【v.182】不再 clone 上游仓库：包在自家 CloudRunFilesBuilder 的 release 里。
+  #   上游 wukongdaily/* 停更于 2026-07-03；它的 run/x86 同时存在「子目录」与「.run」两种形态，
+  #   子目录里的散装包靠 cp -r 搬过来后必须再靠 prepare 脚本的子目录扫描兜住，
+  #   任一环漏掉，ImageBuilder 就是 opkg 报 Unknown package、make image 失败。
+  #   自家 release 已经把每个插件打成固定名 <插件名>_x86_64.run，解压即得包，
+  #   不再依赖源仓库的目录布局，也不会再出现「目录搬丢、run 包搬丢」这类半成品。
+  #   固定名与 shell/prepare-packages.sh 里单独拉的 clashoo 同源同 tag。
+  echo "🔄 正在同步第三方软件仓库（CloudRunFilesBuilder release: extra-ipk）..."
+  RUN_TAG="extra-ipk"
+  RUN_REPO="xiealon/CloudRunFilesBuilder"
+  RUN_API="https://api.github.com/repos/${RUN_REPO}/releases/tags/${RUN_TAG}"
 
-  # 拷贝 run/x86 下所有 run 文件和 ipk 文件 到 extra-packages 目录
   mkdir -p /home/build/immortalwrt/extra-packages
-  cp -r /tmp/store-run-repo/run/x86/* /home/build/immortalwrt/extra-packages/
+  rm -f /home/build/immortalwrt/extra-packages/*.run
 
-  echo "✅ Run files copied to extra-packages:"
+  # 资产名清单来源：优先 API（结构化），取不到再退回 release 资产页（无 API 限流）。
+  # 两路都只提取「相对路径」，下载时统一补 https://github.com，避免两处前缀不一致。
+  RUN_LIST=$(wget -qO- "$RUN_API" \
+    | grep -o "${RUN_REPO}/releases/download/${RUN_TAG}/[A-Za-z0-9._~-]*\.run" \
+    | sort -u)
+  if [ -z "$RUN_LIST" ]; then
+    echo "⚠️ API 枚举为空，回退 release 资产页"
+    RUN_LIST=$(wget -qO- "https://github.com/${RUN_REPO}/releases/expanded_assets/${RUN_TAG}" \
+      | grep -o "${RUN_REPO}/releases/download/${RUN_TAG}/[A-Za-z0-9._~-]*\.run" \
+      | sort -u)
+  fi
+  if [ -z "$RUN_LIST" ]; then
+    echo "::error::从 tag=${RUN_TAG} 没取到任何 .run 资产（两路枚举都为空）"
+    exit 1
+  fi
+
+  _n=0
+  for _p in $RUN_LIST; do
+    _f=$(basename "$_p")
+    wget -q "https://github.com/$_p" -P /home/build/immortalwrt/extra-packages/ \
+      || { echo "::error::下载失败: https://github.com/$_p"; exit 1; }
+    echo "  + $_f $(stat -c%s "/home/build/immortalwrt/extra-packages/$_f") B"
+    _n=$((_n+1))
+  done
+  echo "✅ 已取 $_n 个 run 包（tag=${RUN_TAG}）"
+
+  echo "✅ Run files fetched to extra-packages:"
   ls -lh /home/build/immortalwrt/extra-packages/*.run
-  # 解压并拷贝ipk到packages目录
   sh shell/prepare-packages.sh
   ls -lah /home/build/immortalwrt/packages/
   # 解压完核验包名，报告直接进日志；只报告不拦构，真会拦的是 opkg 的 Unknown package
@@ -58,6 +88,7 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') - 开始构建固件..."
 
 PACKAGES=""
 PACKAGES="$PACKAGES curl"
+PACKAGES="$PACKAGES -dnsmasq dnsmasq-full"
 PACKAGES="$PACKAGES luci-i18n-diskman-zh-cn"
 PACKAGES="$PACKAGES luci-i18n-firewall-zh-cn"
 PACKAGES="$PACKAGES luci-theme-argon"
@@ -89,19 +120,6 @@ if echo "$PACKAGES" | grep -q "luci-app-openclash"; then
     wget "$URL" -P /home/build/immortalwrt/packages/
 else
     echo "⚪️ 未选择 luci-app-openclash"
-fi
-
-if echo "$PACKAGES" | grep -q "luci-app-ssr-plus"; then
-    echo "✅ 已选择 luci-app-ssr-plus，添加 mihomo core"
-    mkdir -p files/usr/bin
-    MIHOMO_URL="https://github.com/MetaCubeX/mihomo/releases/download/v1.19.24/mihomo-linux-amd64-compatible-v1.19.24.gz"
-    wget -qO- "$MIHOMO_URL" | gzip -dc > files/usr/bin/mihomo
-    [ -s files/usr/bin/mihomo ] || { echo "::error::mihomo 内核下载失败: $MIHOMO_URL"; exit 1; }
-    chmod +x files/usr/bin/mihomo
-    echo "✅ 已下载 mihomo core: $(stat -c%s files/usr/bin/mihomo) bytes"
-    ls -lah files/usr/bin
-else
-    echo "⚠️ 未选择 luci-app-ssr-plus"
 fi
 
 # 【v.108.71】SSR Plus → Clashoo。
