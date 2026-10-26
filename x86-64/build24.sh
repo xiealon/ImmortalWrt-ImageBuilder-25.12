@@ -45,19 +45,28 @@ else
   mkdir -p /home/build/immortalwrt/extra-packages
   rm -f /home/build/immortalwrt/extra-packages/*.run
 
+  # 资产名清单来源：优先 API（结构化），取不到再退回 release 资产页（无 API 限流）。
+  # 两路都只提取「相对路径」，下载时统一补 https://github.com，避免两处前缀不一致。
   RUN_LIST=$(wget -qO- "$RUN_API" \
-    | grep -o "https://github.com/${RUN_REPO}/releases/download/${RUN_TAG}/[A-Za-z0-9._~-]*\.run" \
+    | grep -o "${RUN_REPO}/releases/download/${RUN_TAG}/[A-Za-z0-9._~-]*\.run" \
     | sort -u)
   if [ -z "$RUN_LIST" ]; then
-    echo "::error::从 ${RUN_API} 没取到任何 .run 资产（release 不存在 / 被改名 / API 限流）"
+    echo "⚠️ API 枚举为空，回退 release 资产页"
+    RUN_LIST=$(wget -qO- "https://github.com/${RUN_REPO}/releases/expanded_assets/${RUN_TAG}" \
+      | grep -o "${RUN_REPO}/releases/download/${RUN_TAG}/[A-Za-z0-9._~-]*\.run" \
+      | sort -u)
+  fi
+  if [ -z "$RUN_LIST" ]; then
+    echo "::error::从 tag=${RUN_TAG} 没取到任何 .run 资产（两路枚举都为空）"
     exit 1
   fi
+
   _n=0
-  for u in $RUN_LIST; do
-    f=$(basename "$u")
-    wget -q "$u" -P /home/build/immortalwrt/extra-packages/ \
-      || { echo "::error::下载失败: $u"; exit 1; }
-    echo "  + $f $(stat -c%s "/home/build/immortalwrt/extra-packages/$f") B"
+  for _p in $RUN_LIST; do
+    _f=$(basename "$_p")
+    wget -q "https://github.com/$_p" -P /home/build/immortalwrt/extra-packages/ \
+      || { echo "::error::下载失败: https://github.com/$_p"; exit 1; }
+    echo "  + $_f $(stat -c%s "/home/build/immortalwrt/extra-packages/$_f") B"
     _n=$((_n+1))
   done
   echo "✅ 已取 $_n 个 run 包（tag=${RUN_TAG}）"
