@@ -13,13 +13,13 @@ TARGET_DIR="packages"
 #   ① 资产名带 25- 前缀，否则会取到 24.10 的 ipk 版；
 #   ② apk 仓库里 clashoo 是 run/x86/clashoo/ 目录（三个 apk），不是 run 文件，
 #      所以连目录一起删，否则旧 apk 会被下面的 find 收进 packages/。
-RUN_BASE="https://github.com/xiealon/CloudRunFilesBuilder/releases/download/extra"
+RUN_BASE="https://github.com/xiealon/CloudRunFilesBuilder/releases/download/extra-apk"
 for _pkg in clashoo; do
-    rm -f "$BASE_DIR"/25-${_pkg}_*.run
+    rm -f "$BASE_DIR"/${_pkg}_*.run
     rm -rf "$BASE_DIR"/${_pkg}
-    wget -q "$RUN_BASE/25-${_pkg}_x86_64.run" -P "$BASE_DIR"/ \
-        || { echo "::error::下载 25-${_pkg} 失败: $RUN_BASE/25-${_pkg}_x86_64.run"; exit 1; }
-    echo "✅ 25-${_pkg} 已取: 25-${_pkg}_x86_64.run ($(stat -c%s "$BASE_DIR/25-${_pkg}_x86_64.run") bytes)"
+    wget -q "$RUN_BASE/${_pkg}_x86_64.run" -P "$BASE_DIR"/ \
+        || { echo "::error::下载 ${_pkg} 失败: $RUN_BASE/${_pkg}_x86_64.run"; exit 1; }
+    echo "✅ ${_pkg} 已取: ${_pkg}_x86_64.run ($(stat -c%s "$BASE_DIR/${_pkg}_x86_64.run") bytes)"
 done
 
 rm -rf "$TEMP_DIR" "$TARGET_DIR"
