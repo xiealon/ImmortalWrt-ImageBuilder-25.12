@@ -29,13 +29,44 @@ done
 if [ -z "$CUSTOM_PACKAGES" ]; then
   echo "⚪️ 未选择 任何第三方软件包"
 else
-  echo "🔄 正在同步第三方软件仓库 Cloning run file repo..."
-  git clone --depth=1 https://github.com/wukongdaily/apk.git /tmp/store-apk-repo
+  # 【v.182】不再 clone 上游仓库：包在自家 CloudRunFilesBuilder 的 release 里。
+  #   上游 wukongdaily/* 停更于 2026-07-03；它的 run/x86 同时存在「子目录」与「.run」两种形态，
+  #   子目录里的散装包靠 cp -r 搬过来后必须再靠 prepare 脚本的子目录扫描兜住，
+  #   任一环漏掉，ImageBuilder 就是 opkg 报 Unknown package、make image 失败。
+  #   自家 release 已经把每个插件打成固定名 <插件名>_x86_64.run，解压即得包，
+  #   不再依赖源仓库的目录布局，也不会再出现「目录搬丢、run 包搬丢」这类半成品。
+  #   固定名与 shell/prepare-packages.sh 里单独拉的 clashoo 同源同 tag。
+  echo "🔄 正在同步第三方软件仓库（CloudRunFilesBuilder release: extra-apk）..."
+  RUN_TAG="extra-apk"
+  RUN_REPO="xiealon/CloudRunFilesBuilder"
+  RUN_API="https://api.github.com/repos/${RUN_REPO}/releases/tags/${RUN_TAG}"
 
   mkdir -p /home/build/immortalwrt/extra-packages
-  cp -r /tmp/store-apk-repo/run/x86/* /home/build/immortalwrt/extra-packages/
+  rm -f /home/build/immortalwrt/extra-packages/*.run
 
-  echo "✅ Run files copied to extra-packages:"
+  RUN_LIST=$(wget -qO- "$RUN_API" \
+    | grep -o "https://github.com/${RUN_REPO}/releases/download/${RUN_TAG}/[A-Za-z0-9._~-]*\.run" \
+    | sort -u)
+  if [ -z "$RUN_LIST" ]; then
+    echo "::error::从 ${RUN_API} 没取到任何 .run 资产（release 不存在 / 被改名 / API 限流）"
+    exit 1
+  fi
+  _n=0
+  for u in $RUN_LIST; do
+    f=$(basename "$u")
+    wget -q "$u" -P /home/build/immortalwrt/extra-packages/ \
+      || { echo "::error::下载失败: $u"; exit 1; }
+    echo "  + $f $(stat -c%s "/home/build/immortalwrt/extra-packages/$f") B"
+    _n=$((_n+1))
+  done
+  echo "✅ 已取 $_n 个 run 包（tag=${RUN_TAG}）"
+
+  # daed 与 openwrt-daede 是两个互斥实现（包名 daed / vmlinux-btf 互相覆盖），只留 daed。
+  # 这一行以前删的是目录（cp -r 时代的残留），现在资产是固定名 .run，必须删 .run。
+  rm -f /home/build/immortalwrt/extra-packages/openwrt-daede_x86_64.run
+
+  echo "✅ Run files fetched to extra-packages:"
+  ls -lh /home/build/immortalwrt/extra-packages/*.run
   sh shell/apk-prepare-packages.sh
   ls -lah /home/build/immortalwrt/packages/
 fi
