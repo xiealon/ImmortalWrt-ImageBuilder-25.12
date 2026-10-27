@@ -1,5 +1,5 @@
 #!/bin/bash
-# 【v.180.79】固件版本标记 —— 与 crowdsec-lxc-bootstrap.sh 的 SCRIPT_VER 同步，每次改脚本一起改
+# 【v.180.78】固件版本标记 —— 与 crowdsec-lxc-bootstrap.sh 的 SCRIPT_VER 同步，每次改脚本一起改
 source shell/apk-custom-packages.sh
 echo "第三方apk软件包: $CUSTOM_PACKAGES"
 LOGFILE="/tmp/uci-defaults-log.txt"
@@ -29,62 +29,15 @@ done
 if [ -z "$CUSTOM_PACKAGES" ]; then
   echo "⚪️ 未选择 任何第三方软件包"
 else
-  # 【v.182】不再 clone 上游仓库：包在自家 CloudRunFilesBuilder 的 release 里。
-  #   上游 wukongdaily/* 停更于 2026-07-03；它的 run/x86 同时存在「子目录」与「.run」两种形态，
-  #   子目录里的散装包靠 cp -r 搬过来后必须再靠 prepare 脚本的子目录扫描兜住，
-  #   任一环漏掉，ImageBuilder 就是 opkg 报 Unknown package、make image 失败。
-  #   自家 release 已经把每个插件打成固定名 <插件名>_x86_64.run，解压即得包，
-  #   不再依赖源仓库的目录布局，也不会再出现「目录搬丢、run 包搬丢」这类半成品。
-  #   固定名与 shell/prepare-packages.sh 里单独拉的 clashoo 同源同 tag。
-  echo "🔄 正在同步第三方软件仓库（CloudRunFilesBuilder release: extra-apk）..."
-  RUN_TAG="extra-apk"
-  RUN_REPO="xiealon/CloudRunFilesBuilder"
-  RUN_API="https://api.github.com/repos/${RUN_REPO}/releases/tags/${RUN_TAG}"
+  echo "🔄 正在同步第三方软件仓库 Cloning run file repo..."
+  git clone --depth=1 https://github.com/wukongdaily/apk.git /tmp/store-apk-repo
 
   mkdir -p /home/build/immortalwrt/extra-packages
-  rm -f /home/build/immortalwrt/extra-packages/*.run
+  cp -r /tmp/store-apk-repo/run/x86/* /home/build/immortalwrt/extra-packages/
 
-  # 资产名清单来源：优先 API（结构化），取不到再退回 release 资产页（无 API 限流）。
-  # 两路都只提取「相对路径」，下载时统一补 https://github.com，避免两处前缀不一致。
-  RUN_LIST=$(wget -qO- "$RUN_API" \
-    | grep -o "${RUN_REPO}/releases/download/${RUN_TAG}/[A-Za-z0-9._~-]*\.run" \
-    | sort -u)
-  if [ -z "$RUN_LIST" ]; then
-    echo "⚠️ API 枚举为空，回退 release 资产页"
-    RUN_LIST=$(wget -qO- "https://github.com/${RUN_REPO}/releases/expanded_assets/${RUN_TAG}" \
-      | grep -o "${RUN_REPO}/releases/download/${RUN_TAG}/[A-Za-z0-9._~-]*\.run" \
-      | sort -u)
-  fi
-  if [ -z "$RUN_LIST" ]; then
-    echo "::error::从 tag=${RUN_TAG} 没取到任何 .run 资产（两路枚举都为空）"
-    exit 1
-  fi
-
-  _n=0
-  for _p in $RUN_LIST; do
-    _f=$(basename "$_p")
-    wget -q "https://github.com/$_p" -P /home/build/immortalwrt/extra-packages/ \
-      || { echo "::error::下载失败: https://github.com/$_p"; exit 1; }
-    echo "  + $_f $(stat -c%s "/home/build/immortalwrt/extra-packages/$_f") B"
-    _n=$((_n+1))
-  done
-  echo "✅ 已取 $_n 个 run 包（tag=${RUN_TAG}）"
-
-  # daed 与 openwrt-daede 是两个互斥实现（包名 daed / vmlinux-btf 互相覆盖），只留 daed。
-  # 以前删的是子目录（cp -r 时代的残留），现在资产是固定名 .run，必须删 .run。
-  rm -f /home/build/immortalwrt/extra-packages/openwrt-daede_x86_64.run
-
-  echo "✅ Run files fetched to extra-packages:"
-  ls -lh /home/build/immortalwrt/extra-packages/*.run
+  echo "✅ Run files copied to extra-packages:"
   sh shell/apk-prepare-packages.sh
   ls -lah /home/build/immortalwrt/packages/
-  # 解压完核验包名，报告直接进日志；只报告不拦构，真会拦的是 opkg 的 Unknown package
-  if command -v python3 >/dev/null 2>&1; then
-    python3 shell/audit-package-names.py --dir /home/build/immortalwrt/packages \
-      --list /home/build/immortalwrt/shell/apk-custom-packages.sh || true
-  else
-    echo "⚠️ 环境无 python3，跳过包名核验"
-  fi
 fi
 
 
@@ -134,7 +87,7 @@ if echo "$PACKAGES" | grep -q "clashoo"; then
     if [ -z "$_cl_apk" ] || [ -z "$_cl_luci" ]; then
         echo "::error::PACKAGES 里选了 clashoo，但 packages/ 下缺包（clashoo=$_cl_apk luci=$_cl_luci）—— apk 仓库的 run 没解出 apk"
         ls -la packages/ 2>/dev/null || true
-        echo "::error::预期来自 CloudRunFilesBuilder 的 extra 标签：25-clashoo_x86_64.run"
+        echo "::error::预期来自 wukongdaily/apk 的 run/x86/clashoo/"
         exit 1
     fi
     echo "✅ clashoo 就位: $_cl_apk + $_cl_luci（自带 mihomo 内核，不再单独下载）"
@@ -279,6 +232,35 @@ echo "==> 已确保 CrowdSec 引导脚本可执行"
 
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Building image with the following packages:"
 echo "$PACKAGES"
+
+# 【v.180.120】把仓库里的自检脚本铺进固件。
+# 刷机后 /rom 里就有这批文件的只读基准，guard 的目录级保护才比得出、也才补得回。
+# 放 /usr/share（只读数据位）而不是 /usr/sbin，免得和真正的可执行命令混在一起。
+#
+# 分两组：
+#   crowdsec-tests/       只读断言类，跑起来不改现场
+#   crowdsec-tests/danger 会写 uci 或注入损坏的那几个，动之前先看 README
+mkdir -p files/usr/share/crowdsec-tests/danger
+_t_n=0
+_t_d=0
+for _t in tests/*; do
+    [ -f "$_t" ] || continue
+    case "${_t##*/}" in
+    probe_netsafe.sh|probe_v10832.sh|test_bp_*)
+        cp -a "$_t" files/usr/share/crowdsec-tests/danger/ || exit 1
+        _t_d=$((_t_d + 1))
+        ;;
+    *)
+        cp -a "$_t" files/usr/share/crowdsec-tests/ || exit 1
+        _t_n=$((_t_n + 1))
+        ;;
+    esac
+done
+chmod 755 files/usr/share/crowdsec-tests/*.sh files/usr/share/crowdsec-tests/danger/*.sh 2>/dev/null || true
+chmod 644 files/usr/share/crowdsec-tests/*.py 2>/dev/null || true
+# 空目录会被 make image 静默丢掉，铺不出东西就别往下走
+[ "$_t_n" -gt 0 ] || { echo "::error::自检脚本一个都没铺进去（tests/* 为空？）"; exit 1; }
+echo "==> 自检脚本已铺进固件：只读 $_t_n 个，danger $_t_d 个"
 
 make image PROFILE="generic" PACKAGES="$PACKAGES" FILES="/home/build/immortalwrt/files" ROOTFS_PARTSIZE=$PROFILE
 
