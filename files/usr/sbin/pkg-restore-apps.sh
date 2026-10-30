@@ -159,13 +159,8 @@ _PA_LIST="${CS_PROBE_APPS:-$_PA_CLASHOO $_PA_DAED $_PA_MOSDNS $_PA_COMMON}"
 
 log() { printf '[APP] %s\n' "$*"; }
 
-# 包管理器：本版写死 apk（25.12 线只有 apk），不探测、不分支。
-# 只查「apk 在不在」——不在就返回 1，调用方 exit 2。
-# rc=2 是「判断不了」，不是「包丢了」：真丢了会返回 0、由 _pa_installed 说缺。
-# 探针 _apps_watch 认这个 2（crowdsec-lxc-probe.sh:420）：不计数、不动作。
-_pa_pm() {
-    command -v apk >/dev/null 2>&1
-}
+# 【v.180.199】_pa_pm 删除：apk 是 25.12 的系统包管理器，必然在位（用户 2026-10-31 定）。
+# 原来那层 command -v 探测只会产出一个永不触发的 exit 2。
 
 # 24.10 线才需要 _PA_CACHE（opkg list-installed 是全表扫描，缓存后只跑一次）；
 # 25.12 的 apk info -e 直接问包数据库，不需要缓存，本文件不保留这个变量。
@@ -273,16 +268,13 @@ _pa_repair() {
 
 case "${1:---repair}" in
 --check)
-    _pa_pm || { log "判断不了：apk 不在"; exit 2; }
     _pa_check && exit 0 || exit 1
     ;;
 --list)
-    _pa_pm || { log "判断不了：apk 不在"; exit 2; }
     _pa_list
     exit 0
     ;;
 --repair)
-    _pa_pm || { log "判断不了：apk 不在"; exit 2; }
     _pa_repair && exit 0 || exit 1
     ;;
 -*)

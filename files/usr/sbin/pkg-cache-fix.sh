@@ -19,10 +19,10 @@
 
 set -u
 
+# 【v.180.199】路径写死：固件里就在 /usr/sbin，不再做「同目录兜底」分支。
 _pcf_lib=/usr/sbin/pkg-cache-lib.sh
-[ -f "$_pcf_lib" ] || _pcf_lib="$(dirname "$0")/pkg-cache-lib.sh"
 if [ ! -f "$_pcf_lib" ]; then
-    echo "找不到 pkg-cache-lib.sh" >&2
+    echo "找不到 $_pcf_lib" >&2
     exit 1
 fi
 . "$_pcf_lib"
@@ -51,11 +51,7 @@ _pcf_beat() {
     return 1
 }
 
-# 【v.180.198】不再判 PKG_MGR（本仓库固定 apk，判据在 pkg-cache-lib.sh 里写死）。
-command -v "$APK_BIN" >/dev/null 2>&1 || {
-    pcl_log "没有 $APK_BIN，无法修复"
-    exit 1
-}
+# 【v.180.199】apk 是 25.12 的系统包管理器，必然在位，不再 command -v 探测。
 
 # ② 挂源：按前缀删掉旧行再追加，其余源一个字不碰
 _pcf_feed_ensure() {
@@ -106,7 +102,7 @@ _pcf_lists_ensure() {
     # 仍然两个都试：万一某个版本的 apk 只有 index，也别直接放弃。
     # --allow-untrusted 是全局选项，必须放在 applet 前面。
     for _pcf_ap in mkndx index; do
-        if ( cd "$PKG_CACHE_ACT" && "$APK_BIN" --allow-untrusted "$_pcf_ap" -o packages.adb ./*.apk ) \
+        if ( cd "$PKG_CACHE_ACT" && apk --allow-untrusted "$_pcf_ap" -o packages.adb ./*.apk ) \
                 >/dev/null 2>&1 && [ -s "$_pcf_adb" ]; then
             pcl_log "已重建依赖查询表：$_pcf_adb（$_pcf_n 个包，apk $_pcf_ap）"
             return 0

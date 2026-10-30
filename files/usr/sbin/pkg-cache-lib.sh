@@ -25,7 +25,8 @@ ROOT_DIR="${ROOT_DIR%/}"
 
 pcl_log() {
     echo "[PKG] $*"
-    command -v logger >/dev/null 2>&1 && logger -t pkg-cache "$*" 2>/dev/null
+    # 【v.180.199】logger 是 busybox 自带 applet，写死不探测。
+    logger -t pkg-cache "$*" 2>/dev/null
     return 0
 }
 
@@ -52,9 +53,8 @@ pcl_log_q() {
 # 留着 `if [ "$PKG_MGR" = "apk" ]` 的结果是「一半分支永远不可达」——
 # 判据名义上存在，实际上谁也走不到，改起来还得多想一层。
 #
-# APK_BIN 不是判断开关，只是夹具的入口：生产环境就是 apk，
-# 在没有真实 apk 的机器上验「索引重建」时指到一个假的。
-APK_BIN="${APK_BIN:-apk}"
+# 【v.180.199】连 APK_BIN 变量也删了：直接写 `apk`，命令名不再走一层间接。
+# 需要假的 apk 时放 PATH 前面即可，不必再造一个环境变量入口。
 
 PKG_CACHE_RO="${PKG_CACHE_RO:-$ROM_DIR/root/apk-cache}"
 PKG_CACHE="${PKG_CACHE:-$ROOT_DIR/root/apk-cache}"

@@ -22,24 +22,17 @@
 
 set -u
 
-_pcr_dir=$(dirname "$0")
+# 【v.180.199】路径全部写死：固件里就在 /usr/sbin，不再做「同目录兜底」分支。
 _pcr_lib=/usr/sbin/pkg-cache-lib.sh
-[ -f "$_pcr_lib" ] || _pcr_lib="$_pcr_dir/pkg-cache-lib.sh"
 if [ ! -f "$_pcr_lib" ]; then
-    echo "找不到 pkg-cache-lib.sh" >&2
+    echo "找不到 $_pcr_lib" >&2
     exit 1
 fi
 . "$_pcr_lib"
 
-# 【v.180.198】不再判 PKG_MGR（本仓库固定 apk，判据在 pkg-cache-lib.sh 里写死）。
-# 只保留一条有用的早退：apk 二进制本身都没有，后面每一步都注定失败，不如先说清楚。
-command -v "$APK_BIN" >/dev/null 2>&1 || {
-    pcl_log "没有 $APK_BIN，无法装回"
-    exit 1
-}
+# 【v.180.199】apk 是 25.12 的系统包管理器，必然在位，不再 command -v 探测。
 
 _pcr_fix=/usr/sbin/pkg-cache-fix.sh
-[ -x "$_pcr_fix" ] || _pcr_fix="$_pcr_dir/pkg-cache-fix.sh"
 
 # 装之前的最小前置：源与索引都健康才跳过 fix
 _pcr_prepare() {

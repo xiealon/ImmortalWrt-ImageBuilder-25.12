@@ -36,25 +36,14 @@ set -u
 ROMDIR="${ROMDIR:-/rom}"
 PKGROOT="${PKGROOT:-}"
 
-# 包级安装脚本的查找顺序（v.180.147）：
-#   ① 显式 RESTORE_BIN
-#   ② /usr/sbin/pkg-cache-restore.sh —— 固件里的正式位置
-#   ③ 与本脚本同目录 —— 脚本被拷到 /tmp 单独验时的情况
-RESTORE_BIN="${RESTORE_BIN:-}"
-if [ -z "$RESTORE_BIN" ]; then
-    if [ -x /usr/sbin/pkg-cache-restore.sh ]; then
-        RESTORE_BIN=/usr/sbin/pkg-cache-restore.sh
-    else
-        RESTORE_BIN="$(dirname "$0")/pkg-cache-restore.sh"
-    fi
-fi
+# 【v.180.199】包级安装脚本路径写死（用户 2026-10-31 定：能写死的都写死）。
+# 固件里就在 /usr/sbin；「同目录兜底」那条分支在真机上从未走到过，删掉。
+RESTORE_BIN="${RESTORE_BIN:-/usr/sbin/pkg-cache-restore.sh}"
 
 log() { printf '[PKG] %s\n' "$*"; }
 
-# 已装包名表缓存（v.180.148）。一次 lxc 恢复要判三十多个包，
-# 每次跑一遍 opkg list-installed 是三十多次全表扫描；缓存后只跑一次。
-# 装完清空 —— 刚装上的包必须体现在下一次判定里。
-_PR_CACHE=""
+# 【v.180.199】_PR_CACHE 删除：那是 opkg「list-installed 全表扫描」时代的缓存，
+# 本仓库只有 apk，apk info -e 单包直查，缓存变量在 25.12 上只剩赋值、没人读。
 
 _pr_installed() {
     # 25.12 只有 apk：apk info -e 是单包判定，不需要 opkg 那种全表缓存。
@@ -119,7 +108,6 @@ _pr_pkg() {
         # 25.12 实测：删掉 /usr/bin/yq 后这里报「强制重装完成」，文件其实没回来。
         if PCR_FORCE=1 "$RESTORE_BIN" "$_p1" >/dev/null 2>&1 && _pr_files_ok "$_p1"; then
             log "强制重装完成：$_p1"
-            _PR_CACHE=""
             return 0
         fi
         log "强制重装失败：$_p1（本地库没有它，或装完文件仍缺）"
@@ -127,7 +115,6 @@ _pr_pkg() {
     fi
     if "$RESTORE_BIN" "$_p1" >/dev/null 2>&1; then
         log "包级装回：$_p1（包管理器记账已同步）"
-        _PR_CACHE=""
         return 0
     fi
     log "恢复失败：$_p1（本地包库没有它，或包管理器不可用）"

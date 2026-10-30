@@ -840,7 +840,7 @@ _pkgcache_lists_ensure() {
 _pkgcache_install_apk() {
     _pci_pkg="$1"
     _pkgcache_ready || return 1
-    command -v apk >/dev/null 2>&1 || return 1
+    # 【v.180.199】apk 必在，写死不探测。
     # 已装就跳过：没坏的东西不该重装一遍
     # 【v.180.161】PCR_FORCE=1 时不跳：同上，记账在、文件缺。
     if [ "${PCR_FORCE:-0}" != "1" ] && apk info -e "$_pci_pkg" >/dev/null 2>&1; then
