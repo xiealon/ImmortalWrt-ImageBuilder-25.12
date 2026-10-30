@@ -159,7 +159,7 @@ _PA_LIST="${CS_PROBE_APPS:-$_PA_CLASHOO $_PA_DAED $_PA_MOSDNS $_PA_COMMON}"
 
 log() { printf '[APP] %s\n' "$*"; }
 
-# 【v.180.199】_pa_pm 删除：apk 是 25.12 的系统包管理器，必然在位（用户 2026-10-31 定）。
+# 【2026-10-31.0256】_pa_pm 删除：apk 是 25.12 的系统包管理器，必然在位（用户 2026-10-31 定）。
 # 原来那层 command -v 探测只会产出一个永不触发的 exit 2。
 
 # 24.10 线才需要 _PA_CACHE（opkg list-installed 是全表扫描，缓存后只跑一次）；
