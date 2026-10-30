@@ -30,7 +30,7 @@ if [ -z "$CUSTOM_PACKAGES" ]; then
   echo "⚪️ 未选择 任何第三方软件包"
 else
   echo "🔄 正在同步第三方软件仓库 Cloning run file repo..."
-  git clone --depth=1 https://github.com/wukongdaily/apk.git /tmp/store-apk-repo
+  git clone --depth=1 https://github.com/xiealon/apk.git /tmp/store-apk-repo
 
   mkdir -p /home/build/immortalwrt/extra-packages
   cp -r /tmp/store-apk-repo/run/x86/* /home/build/immortalwrt/extra-packages/
@@ -80,14 +80,14 @@ fi
 
 # 【v.108.71】SSR Plus → Clashoo（与 build24.sh 同一个理由）。
 # clashoo 的 apk 自带 mihomo（Provides: mihomo, clash-meta），不再单独下内核；
-# 改成断言 wukongdaily/apk 的 run/x86/clashoo/ 里那三个 apk 真的进了 packages/。
+# 改成断言 xiealon/apk 的 run/x86/clashoo/ 里那三个 apk 真的进了 packages/。
 if echo "$PACKAGES" | grep -q "clashoo"; then
     _cl_apk=$(ls packages/clashoo-*.apk 2>/dev/null | head -n1)
     _cl_luci=$(ls packages/luci-app-clashoo-*.apk 2>/dev/null | head -n1)
     if [ -z "$_cl_apk" ] || [ -z "$_cl_luci" ]; then
         echo "::error::PACKAGES 里选了 clashoo，但 packages/ 下缺包（clashoo=$_cl_apk luci=$_cl_luci）—— apk 仓库的 run 没解出 apk"
         ls -la packages/ 2>/dev/null || true
-        echo "::error::预期来自 wukongdaily/apk 的 run/x86/clashoo/"
+        echo "::error::预期来自 xiealon/apk 的 run/x86/clashoo/"
         exit 1
     fi
     echo "✅ clashoo 就位: $_cl_apk + $_cl_luci（自带 mihomo 内核，不再单独下载）"
