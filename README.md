@@ -2680,7 +2680,7 @@ workflow 的 `docker run` 是**白名单挂载**，只挂了这几条：
 | `x86-64/imm.config` | `/home/build/immortalwrt/.config` |
 | `shell` | `/home/build/immortalwrt/shell` |
 | `rootfs-skel` | `/home/build/immortalwrt/rootfs-skel` |
-| `x86-64/build24.sh` | `/home/build/immortalwrt/build.sh` |
+| `x86-64/build25.sh` | `/home/build/immortalwrt/build.sh` |
 
 `tests/` 不在名单里。于是 `for _t in tests/*` 在容器内不会展开，`$_t` 字面量就是
 `tests/*`，`[ -f "tests/*" ]` 为假 → 全部 `continue` → 计数 0 → 撞上上一版写的
