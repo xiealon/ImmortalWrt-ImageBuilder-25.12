@@ -9,7 +9,7 @@
 # 不是它的任何一个选项值。
 set -u
 REPO=$(cd "$(dirname "$0")/.." && pwd)
-FILES_DIR="${CS_FILES_DIR:-files-24}"
+FILES_DIR="${CS_FILES_DIR:-files}"
 BS="$REPO/$FILES_DIR/usr/sbin/crowdsec-lxc-bootstrap.sh"
 # 只含活代码的副本：整行注释（行首可有空白 + #）不算命中。
 # 注释里提到某关键字（例如记录「曾经 disable lxc-auto」）不该被断言当成
@@ -261,16 +261,12 @@ ck "R15.15d 固化配置里容器名是 ubuntu" \
    "$(grep -c "^	option name 'ubuntu'$" "$REPO/$FILES_DIR/etc/config/lxc-auto")" "1"
 # 挂载点必须避开 files/etc/config，否则上面那份文件照样进不了镜像
 ck "R15.15e workflow 不把 custom 挂到 files/etc/config" \
-   "$(grep -c 'custom:/home/build/immortalwrt/files/etc/config' "$REPO/.github/workflows/build-x86-64-24.10.x.yml" "$REPO/.github/workflows/build-x86-64-25.12.x.yml" | awk -F: '{s+=$2} END{print s+0}')" "0"
-ck "R15.15f build24.sh 把 custom/* 拷进 files/etc/config" \
-   "$(grep -c 'cp -f "$_cf" /home/build/immortalwrt/files/etc/config/' "$REPO/x86-64/build24.sh")" "1"
+   "$(grep -c 'custom:/home/build/immortalwrt/files/etc/config' "$REPO/.github/workflows/build-x86-64-25.12.x.yml")" "0"
 ck "R15.15g build25.sh 把 custom/* 拷进 files/etc/config" \
    "$(grep -c 'cp -f "$_cf" /home/build/immortalwrt/files/etc/config/' "$REPO/x86-64/build25.sh")" "1"
 # uci-defaults 保留为兜底（幂等：名字已对就 exit 0，不动固化好的配置）
 ck "R15.15h uci-defaults 兜底脚本仍在" \
    "$(grep -c 'lxc-auto.@container\[-1\].name=$_LXC_NAME' "$REPO/$FILES_DIR/etc/uci-defaults/98-lxc-auto.sh")" "1"
-ck "R15.15i build24.sh 给 uci-defaults 下脚本补执行位" \
-   "$(grep -c 'files/etc/uci-defaults/\*\.sh' "$REPO/x86-64/build24.sh")" "1"
 ck "R15.15j build25.sh 给 uci-defaults 下脚本补执行位" \
    "$(grep -c 'files/etc/uci-defaults/\*\.sh' "$REPO/x86-64/build25.sh")" "1"
 # 容器名现在有三处来源：bootstrap 的 LXC_NAME 默认值、uci-defaults 兜底、固化配置。
@@ -282,8 +278,6 @@ ck "R15.15k 三处容器名一致" \
       } | sort -u | wc -l | tr -d ' ')" "1"
 # custom/ 的拷贝排在 make image 之前，谁拷谁赢：注入的 lxc-auto 能覆盖固化配置，
 # 把容器名改掉且现场毫无报错。两个构建脚本都必须显式跳过它。
-ck "R15.15l build24.sh 跳过 custom/lxc-auto" \
-   "$(grep -c 'case "$(basename "$_cf")"' "$REPO/x86-64/build24.sh")" "1"
 ck "R15.15m build25.sh 跳过 custom/lxc-auto" \
    "$(grep -c 'case "$(basename "$_cf")"' "$REPO/x86-64/build25.sh")" "1"
 # files/etc/init.d/lxc-auto 的 start_container() 会执行段里的 `list command`。
@@ -366,9 +360,8 @@ ck "R15.29 lxc-auto 兼容 lxc.start.auto" \
 echo "== 11 编译期锁死：容器恒内置，没有开关可关 =="
 # 只要「能选择不内置」这个口子还在，就会有人选它，然后得到一个「填了 Router IP
 # 却不生效」的固件。开关删掉、1G 选项删掉、空间不足直接失败——不给这个组合留门。
-W24="$REPO/.github/workflows/build-x86-64-24.10.x.yml"
 W25="$REPO/.github/workflows/build-x86-64-25.12.x.yml"
-for _w in "$W24" "$W25"; do
+for _w in "$W25"; do
     _n=$(basename "$_w" .yml)
     ck "R16.1 $_n 无 Include Crowdsec 输入项" \
        "$(grep -c '^      Include Crowdsec:' "$_w")" "0"
@@ -383,7 +376,7 @@ for _w in "$W24" "$W25"; do
 done
 # 两种结构都算过：master 只有 Download（v.108.59 删掉了 Prepare 回退），
 # patch-1 这类「纯本地构建」分支只有 Prepare —— 判据是「至少有一条产出容器的路」。
-for _w in "$W24" "$W25"; do
+for _w in "$W25"; do
     ck "R16.6 $(basename "$_w" .yml) 仍会取容器 rootfs（Download 或 Prepare 至少一条在）" \
        "$(grep -cE 'Download prebuilt Crowdsec LXC tarball|Prepare Crowdsec LXC Rootfs' "$_w" \
           | awk '{ print ($1 >= 1) ? "1" : "0" }')" "1"
