@@ -51,10 +51,11 @@ _pcf_beat() {
     return 1
 }
 
-if [ -z "$PKG_MGR" ]; then
-    pcl_log "既没有 apk 也没有 opkg，无法修复"
+# 【v.180.198】不再判 PKG_MGR（本仓库固定 apk，判据在 pkg-cache-lib.sh 里写死）。
+command -v "$APK_BIN" >/dev/null 2>&1 || {
+    pcl_log "没有 $APK_BIN，无法修复"
     exit 1
-fi
+}
 
 # ② 挂源：按前缀删掉旧行再追加，其余源一个字不碰
 _pcf_feed_ensure() {
@@ -70,15 +71,11 @@ _pcf_feed_ensure() {
     else
         : > "$_pcf_tmp" || return 1
     fi
-    if [ "$PKG_MGR" = "apk" ]; then
-        # 【v.180.183】apk 侧只删不写（用户 2026-10-29 定）。
-        # 索引无签名，apk-tools 3.x 会跳过整条源，只换来一条 UNTRUSTED 警告；
-        # 装包走 pkg-cache-restore.sh 里的显式 --repository + --allow-untrusted。
-        # 上面的 grep -vE 已经把旧行滤掉，这里什么都不加就是「清干净」。
-        :
-    else
-        printf 'src/gz pkgcache file://%s\n' "$PKG_CACHE_ACT" >> "$_pcf_tmp" || return 1
-    fi
+    # 【v.180.183】apk 侧只删不写（用户 2026-10-29 定）。
+    # 索引无签名，apk-tools 3.x 会跳过整条源，只换来一条 UNTRUSTED 警告；
+    # 装包走 pkg-cache-restore.sh 里的显式 --repository + --allow-untrusted。
+    # 上面的 grep -vE 已经把旧行滤掉，这里什么都不加就是「清干净」。
+    :
     # 不能用 mv 覆盖：conf 若是单文件 bind mount 会报 Device or resource busy
     if ! cat "$_pcf_tmp" > "$PKG_CACHE_CONF" 2>/dev/null; then
         rm -f "$_pcf_tmp"
@@ -88,47 +85,35 @@ _pcf_feed_ensure() {
     return 0
 }
 
-# ③ 铺索引：绕过 opkg update（它会连所有远程源，离线时白等几十秒）
+# ③ 铺索引：apk 没有 lists 中转层，索引就是源目录里的 packages.adb
 _pcf_lists_ensure() {
-    if [ "$PKG_MGR" = "apk" ]; then
-        _pcf_adb="$PKG_CACHE_ACT/packages.adb"
-        [ -s "$_pcf_adb" ] && return 0
-        # apk 的索引没有 lists 中转层，只能原地重建 —— 源目录必须可写。
-        # 重建用的是包库自己那堆 apk，不联网、不依赖任何远程源。
-        if [ ! -w "$PKG_CACHE_ACT" ]; then
-            pcl_log "依赖查询表缺失，且源目录只读（$PKG_CACHE_ACT），只能刷带索引的固件"
-            return 1
-        fi
-        _pcf_n=$(ls "$PKG_CACHE_ACT"/*.apk 2>/dev/null | wc -l)
-        [ "$_pcf_n" -gt 0 ] || return 1
-        # 【v.180.141】必须用 mkndx，不能用 index。
-        # apk 有两个建索引的 applet，作用完全不同（apk-mkndx(8) / apk-index(8)）：
-        #   index -> v2 的 APKINDEX.tar.gz，只吃 tar.gz 包
-        #   mkndx -> apkv3 的 packages.adb，25.12 要的就是这个
-        # 用 index 读 ADB 包，每个包都会报 "file format not supported
-        # (in this applet)" —— 构建脚本栽在这上面，删过 114 个包。
-        # 仍然两个都试：万一某个版本的 apk 只有 index，也别直接放弃。
-        # --allow-untrusted 是全局选项，必须放在 applet 前面。
-        for _pcf_ap in mkndx index; do
-            if ( cd "$PKG_CACHE_ACT" && "$APK_BIN" --allow-untrusted "$_pcf_ap" -o packages.adb ./*.apk ) \
-                    >/dev/null 2>&1 && [ -s "$_pcf_adb" ]; then
-                pcl_log "已重建依赖查询表：$_pcf_adb（$_pcf_n 个包，apk $_pcf_ap）"
-                return 0
-            fi
-        done
-        pcl_log "依赖查询表重建失败（apk index 退出非 0）"
+    _pcf_adb="$PKG_CACHE_ACT/packages.adb"
+    [ -s "$_pcf_adb" ] && return 0
+    # apk 的索引没有 lists 中转层，只能原地重建 —— 源目录必须可写。
+    # 重建用的是包库自己那堆 apk，不联网、不依赖任何远程源。
+    if [ ! -w "$PKG_CACHE_ACT" ]; then
+        pcl_log "依赖查询表缺失，且源目录只读（$PKG_CACHE_ACT），只能刷带索引的固件"
         return 1
     fi
-    _pcf_lists=$(pcl_lists_dir)
-    mkdir -p "$_pcf_lists" 2>/dev/null || return 1
-    # 落盘名必须是源名本身（pkgcache），不是 pkgcache_Packages ——
-    # opkg 按 `src/gz <名字>` 的名字去 lists_dir 找文件。
-    cp -f "$PKG_CACHE_ACT/Packages" "$_pcf_lists/pkgcache" 2>/dev/null || return 1
-    # 验签开着时 opkg 按 <名字>.sig 找签名，找不到会丢弃整份索引
-    if [ -f "$PKG_CACHE_ACT/Packages.sig" ]; then
-        cp -f "$PKG_CACHE_ACT/Packages.sig" "$_pcf_lists/pkgcache.sig" 2>/dev/null
-    fi
-    return 0
+    _pcf_n=$(ls "$PKG_CACHE_ACT"/*.apk 2>/dev/null | wc -l)
+    [ "$_pcf_n" -gt 0 ] || return 1
+    # 【v.180.141】必须用 mkndx，不能用 index。
+    # apk 有两个建索引的 applet，作用完全不同（apk-mkndx(8) / apk-index(8)）：
+    #   index -> v2 的 APKINDEX.tar.gz，只吃 tar.gz 包
+    #   mkndx -> apkv3 的 packages.adb，25.12 要的就是这个
+    # 用 index 读 ADB 包，每个包都会报 "file format not supported
+    # (in this applet)" —— 构建脚本栽在这上面，删过 114 个包。
+    # 仍然两个都试：万一某个版本的 apk 只有 index，也别直接放弃。
+    # --allow-untrusted 是全局选项，必须放在 applet 前面。
+    for _pcf_ap in mkndx index; do
+        if ( cd "$PKG_CACHE_ACT" && "$APK_BIN" --allow-untrusted "$_pcf_ap" -o packages.adb ./*.apk ) \
+                >/dev/null 2>&1 && [ -s "$_pcf_adb" ]; then
+            pcl_log "已重建依赖查询表：$_pcf_adb（$_pcf_n 个包，apk $_pcf_ap）"
+            return 0
+        fi
+    done
+    pcl_log "依赖查询表重建失败（apk index 退出非 0）"
+    return 1
 }
 
 # ① resolve
@@ -141,37 +126,25 @@ pcl_log_q "包库目录：$PKG_CACHE_ACT"
 # ② feed
 if pcl_feed_ok; then
     # 【v.180.183】apk 侧的「健康」= 配置里没有本地源行（见 pkg-cache-lib.sh 说明）。
-    if [ "$PKG_MGR" = "apk" ]; then
-        pcl_log_q "源已清理（apk 侧不挂本地源），跳过"
-    else
-        pcl_log_q "源已正确（file://$PKG_CACHE_ACT），跳过"
-    fi
+    pcl_log_q "源已清理（apk 侧不挂本地源），跳过"
 else
     _pcf_feed_ensure || {
         pcl_log "源配置整理失败：$PKG_CACHE_CONF 不可写"
         exit 1
     }
-    if [ "$PKG_MGR" = "apk" ]; then
-        pcl_log "已摘除本地源（索引无签名，apk 会跳过它并刷 UNTRUSTED 警告）；装包走显式 --repository"
-    else
-        pcl_log "已挂载本地源：file://$PKG_CACHE_ACT"
-    fi
+    pcl_log "已摘除本地源（索引无签名，apk 会跳过它并刷 UNTRUSTED 警告）；装包走显式 --repository"
 fi
 
 # ③ index
 if pcl_lists_ok; then
     # 【v.180.165】apk 没有 lists 中转层，索引就是源目录里的 packages.adb；
     # 原先一律打印 /var/opkg-lists/pkgcache，25.12 上那条路径根本不存在。
-    if [ "$PKG_MGR" = "apk" ]; then
-        pcl_log_q "索引已在位（$PKG_CACHE_ACT/packages.adb），跳过"
-    else
-        pcl_log_q "索引已在位（$(pcl_lists_dir)/pkgcache），跳过"
-    fi
+    pcl_log_q "索引已在位（$PKG_CACHE_ACT/packages.adb），跳过"
 else
     if _pcf_lists_ensure; then
-        pcl_log "索引已铺设：$(pcl_lists_dir)/pkgcache"
+        pcl_log "索引已铺设：$PKG_CACHE_ACT/packages.adb"
     else
-        pcl_log "索引铺设失败（源仍可用，可改走 opkg update 补救）"
+        pcl_log "索引铺设失败（源仍可用，但依赖查询表缺失时 apk add 解不了依赖）"
     fi
 fi
 

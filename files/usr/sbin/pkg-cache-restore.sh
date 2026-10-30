@@ -31,10 +31,12 @@ if [ ! -f "$_pcr_lib" ]; then
 fi
 . "$_pcr_lib"
 
-if [ -z "$PKG_MGR" ]; then
-    pcl_log "既没有 apk 也没有 opkg"
+# 【v.180.198】不再判 PKG_MGR（本仓库固定 apk，判据在 pkg-cache-lib.sh 里写死）。
+# 只保留一条有用的早退：apk 二进制本身都没有，后面每一步都注定失败，不如先说清楚。
+command -v "$APK_BIN" >/dev/null 2>&1 || {
+    pcl_log "没有 $APK_BIN，无法装回"
     exit 1
-fi
+}
 
 _pcr_fix=/usr/sbin/pkg-cache-fix.sh
 [ -x "$_pcr_fix" ] || _pcr_fix="$_pcr_dir/pkg-cache-fix.sh"
@@ -83,68 +85,50 @@ _pcr_install() {
     # "[APK unavailable, skipped]"，一个字节都没写；fix 有包但未装 = 0 且静默跳过；
     # add 依赖不全 = 4；成功 = 0。所以 fix 的成败不能只看 rc，必须同时看输出里
     # 有没有 "APK unavailable"。
-    if [ "$PKG_MGR" = "apk" ]; then
-        _pcr_repos="${TMPDIR:-/tmp}/pkg-cache-restore.repos"
-        printf 'file://%s/%s\n' "$PKG_CACHE_ACT" "$PKG_IDX" > "$_pcr_repos" 2>/dev/null || {
-            pcl_log "写不出临时源文件：$_pcr_repos"
-            return 1
-        }
-        _pcr_use_fix=0
-        if [ "${PCR_FORCE:-0}" = "1" ] && pcl_installed "$_pcr_p"; then
-            _pcr_use_fix=1
-        fi
-        if [ "$_pcr_use_fix" = "1" ]; then
-            # 【v.180.193】rc=0 不等于装上了。25.12 实测（apk-tools 3.0.5）：
-            # 包不在本地库时 apk fix 打
-            #   (1/1) [APK unavailable, skipped] Reinstalling yq (4.53.3-r2)
-            #   OK: 652.3 MiB in 622 packages
-            # 然后返回 **0** —— 一个字节都没写。原来只看 rc，于是报「强制重装成功」。
-            # （上面注释写「fix 包不在库=1」与实测不符，已按实测改。）
-            _pcr_fix_out="$(apk fix --allow-untrusted --repositories-file "$_pcr_repos" "$_pcr_p" 2>&1)"
-            _pcr_fix_rc=$?
-            if [ "$_pcr_fix_rc" = "0" ] \
-               && ! printf '%s\n' "$_pcr_fix_out" | grep -q 'APK unavailable'; then
-                pcl_log "强制重装成功：$_pcr_p（按校验和复检文件）"
-                rm -f "$_pcr_repos"
-                return 0
-            fi
-            pcl_log "强制重装失败：$_pcr_p（本地库没有它，或装完文件仍缺）"
-            rm -f "$_pcr_repos"
-            return 1
-        fi
-        if apk add --allow-untrusted --repositories-file "$_pcr_repos" "$_pcr_p" >/dev/null 2>&1; then
-            pcl_log "本地源装回：$_pcr_p"
+    _pcr_repos="${TMPDIR:-/tmp}/pkg-cache-restore.repos"
+    printf 'file://%s/%s\n' "$PKG_CACHE_ACT" "$PKG_IDX" > "$_pcr_repos" 2>/dev/null || {
+        pcl_log "写不出临时源文件：$_pcr_repos"
+        return 1
+    }
+    _pcr_use_fix=0
+    if [ "${PCR_FORCE:-0}" = "1" ] && pcl_installed "$_pcr_p"; then
+        _pcr_use_fix=1
+    fi
+    if [ "$_pcr_use_fix" = "1" ]; then
+        # 【v.180.193】rc=0 不等于装上了。25.12 实测（apk-tools 3.0.5）：
+        # 包不在本地库时 apk fix 打
+        #   (1/1) [APK unavailable, skipped] Reinstalling yq (4.53.3-r2)
+        #   OK: 652.3 MiB in 622 packages
+        # 然后返回 **0** —— 一个字节都没写。原来只看 rc，于是报「强制重装成功」。
+        # （上面注释写「fix 包不在库=1」与实测不符，已按实测改。）
+        _pcr_fix_out="$(apk fix --allow-untrusted --repositories-file "$_pcr_repos" "$_pcr_p" 2>&1)"
+        _pcr_fix_rc=$?
+        if [ "$_pcr_fix_rc" = "0" ] \
+           && ! printf '%s\n' "$_pcr_fix_out" | grep -q 'APK unavailable'; then
+            pcl_log "强制重装成功：$_pcr_p（按校验和复检文件）"
             rm -f "$_pcr_repos"
             return 0
         fi
-        # 本地库只收应用包（实测 114 个），系统依赖（conntrack / iw / zoneinfo-all
-        # 这类）不在里面，只能走系统已配置的全部源补 —— 这一句会联网，日志写清楚，
-        # 免得事后把「恢复时连过网」当成异常。
-        pcl_log "本地库解不了 $_pcr_p 的依赖，改走系统源（会联网）"
-        if apk add --allow-untrusted "$_pcr_p" >/dev/null 2>&1; then
-            pcl_log "系统源装回：$_pcr_p"
-            rm -f "$_pcr_repos"
-            return 0
-        fi
+        pcl_log "强制重装失败：$_pcr_p（本地库没有它，或装完文件仍缺）"
         rm -f "$_pcr_repos"
-        pcl_log "恢复失败：$_pcr_p（本地库与系统源都没有它）"
         return 1
     fi
-
-    _pcr_f=$(ls "$PKG_CACHE_ACT/${_pcr_p}"_*.ipk 2>/dev/null | head -n1)
-    if [ -n "$_pcr_f" ] && "$OPKG_BIN" install --force-reinstall "$_pcr_f" >/dev/null 2>&1; then
-        pcl_log "直装成功：$_pcr_p"
+    if apk add --allow-untrusted --repositories-file "$_pcr_repos" "$_pcr_p" >/dev/null 2>&1; then
+        pcl_log "本地源装回：$_pcr_p"
+        rm -f "$_pcr_repos"
         return 0
     fi
-    # --no-check-signature：老固件（无 Packages.sig、无公钥）不跳过就装不上；
-    # 新固件签了名，带上也无害 —— 包来自本机只读 squashfs，来源可信。
-    if "$OPKG_BIN" --help 2>&1 | grep -q 'no-check-signature'; then
-        "$OPKG_BIN" --no-check-signature install --force-reinstall "$_pcr_p" >/dev/null 2>&1 \
-            && { pcl_log "源装成功：$_pcr_p"; return 0; }
-    else
-        "$OPKG_BIN" install --force-reinstall "$_pcr_p" >/dev/null 2>&1 \
-            && { pcl_log "源装成功：$_pcr_p"; return 0; }
+    # 本地库只收应用包（实测 114 个），系统依赖（conntrack / iw / zoneinfo-all
+    # 这类）不在里面，只能走系统已配置的全部源补 —— 这一句会联网，日志写清楚，
+    # 免得事后把「恢复时连过网」当成异常。
+    pcl_log "本地库解不了 $_pcr_p 的依赖，改走系统源（会联网）"
+    if apk add --allow-untrusted "$_pcr_p" >/dev/null 2>&1; then
+        pcl_log "系统源装回：$_pcr_p"
+        rm -f "$_pcr_repos"
+        return 0
     fi
+    rm -f "$_pcr_repos"
+    pcl_log "恢复失败：$_pcr_p（本地库与系统源都没有它）"
     return 1
 }
 
