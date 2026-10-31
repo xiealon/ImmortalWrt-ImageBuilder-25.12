@@ -6,6 +6,29 @@ LOGFILE="/tmp/uci-defaults-log.txt"
 echo "Starting 99-custom.sh at $(date)" >> $LOGFILE
 echo "编译固件大小为: $PROFILE MB"
 
+# 【v.180.194】分区大小写进 .config，不只靠命令行。
+# imm25.config 里 CONFIG_TARGET_ROOTFS_PARTSIZE=2048，而下拉框默认是 4G：
+# 只传 `make image ROOTFS_PARTSIZE=` 时，凡是走 .config 的路径（rootfs 上限、
+# gen_image_generic 的偏移计算）仍旧拿到 2048，结果就是「选了 6G、出来还是 2G」。
+# build24.sh 早就这么做了，这边一直缺一段 —— 现在补齐，两边行为一致。
+# .config 是单文件 bind mount，sed -i 靠 rename 会撞 "Device or resource busy"，
+# 所以先写临时文件再原地截断写回。
+if [ -f .config ]; then
+    case "$PROFILE" in
+        ''|*[!0-9]*)
+            echo "::warning::PROFILE=$PROFILE 不是数字，分区沿用 .config 里的值"
+            ;;
+        *)
+            if sed "s|^CONFIG_TARGET_ROOTFS_PARTSIZE=.*|CONFIG_TARGET_ROOTFS_PARTSIZE=$PROFILE|" .config > /tmp/imm25.cfg 2>/dev/null; then
+                cat /tmp/imm25.cfg > .config
+                echo "==> rootfs 分区按 Profile 设为 ${PROFILE}MB"
+            else
+                echo "::warning::改写 .config 的 ROOTFS_PARTSIZE 失败，沿用原值"
+            fi
+            ;;
+    esac
+fi
+
 mkdir -p /home/build/immortalwrt/files/etc/config
 
 # custom/ 由 workflow 挂到 /home/build/immortalwrt/custom（v.108.9）。
