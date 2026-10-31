@@ -332,6 +332,24 @@ else
         echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Build failed (pre-pass)!"
         exit 1
     fi
+    _PRE_PASS=1
+fi
+
+# 【v.180.195】预构建那一遍的镜像本体，用完立刻删。
+# 两遍 make image 各产一个 ${PROFILE}MB 的 img；不删的话第二遍开跑时，
+# 第一遍的 img + img.gz 还躺在 bin/targets 里，磁盘峰值 = 两遍之和，
+# 20G 档能把 14G 的 runner 直接撑爆（报 No space left on device，
+# 出现在 make image 尾部，看着像分区参数被拒，其实是磁盘）。
+# 只删镜像产物：packages/ 与 profiles.json 是第二遍要用的，一个都不能碰。
+# 第二遍 make image 每次都重新 install，删掉会照常重建，不影响产物完整性。
+if [ "${_PRE_PASS:-0}" = "1" ]; then
+    echo "==> 清理预构建产物，把空间让给第二遍"
+    df -h bin | tail -1
+    rm -f bin/targets/x86/64/*.img \
+          bin/targets/x86/64/*.img.gz \
+          bin/targets/x86/64/*.rootfs.tar.gz
+    echo "==> 清理后"
+    df -h bin | tail -1
 fi
 
 # ---- v.180.130：收关键包 apk 到 files/root/apk-cache/ ----
