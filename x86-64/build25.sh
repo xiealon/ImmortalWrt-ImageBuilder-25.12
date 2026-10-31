@@ -55,6 +55,14 @@ if [ -f "$_IMK" ] && grep -q 'of=$(1).new bs=$(2) conv=sync' "$_IMK" 2>/dev/null
     # 一条 sed 完成：把整行换成「bs=1M」+ 新起一行 truncate。
     # 替换串里的 \n 换行、\t 制表符由 sed 解释 —— Makefile 的 recipe 行必须以
     # tab 开头，少了 tab 会报 "missing separator"，所以这里必须显式补 \t。
+    #
+    # truncate 必须存在：补丁靠它把 dd 的结果撑到分区大小。万一没有，
+    # dd 只会产出 487MB 的 img，分区悄悄变成几百兆 —— 构建显示成功、
+    # 固件却不对，比 OOM 更糟。所以先 command -v 拦一道。
+    if ! command -v truncate >/dev/null 2>&1; then
+        echo "::error::容器里没有 truncate，补丁无法保证分区大小，终止"
+        exit 1
+    fi
     sed -i 's|dd if=$(1) of=$(1).new bs=$(2) conv=sync|dd if=$(1) of=$(1).new bs=1M conv=sync\n\ttruncate -s $(2) $(1).new|' "$_IMK"
     if grep -q 'truncate -s $(2) $(1).new' "$_IMK" 2>/dev/null; then
         echo "==> [patch] Image/pad-to 已改：bs=1M + truncate -s \$(2)（避开 20GiB 缓冲）"
