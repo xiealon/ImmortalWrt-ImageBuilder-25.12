@@ -29,6 +29,43 @@ if [ -f .config ]; then
     esac
 fi
 
+# 【v.180.196】给 Image/pad-to 打补丁 —— 20G 分区构建失败的真因。
+#
+# 上游定义（include/image.mk）：
+#     define Image/pad-to
+#         dd if=$(1) of=$(1).new bs=$(2) conv=sync
+#         mv $(1).new $(1)
+#     endef
+# 调用方把 $(2) 传成 "$(CONFIG_TARGET_ROOTFS_PARTSIZE)M"，于是 20G 档就是
+# `dd bs=20480M` —— dd 会先按 bs 分配输入缓冲区，20480M = 20GiB。
+# runner 只有 16GB 内存，直接 OOM：
+#     dd: memory exhausted by input buffer of size 21474836480 bytes (20 GiB)
+#     make[3]: *** [Makefile:160: ...squashfs-rootfs.img.gz] Error 1
+#
+# 这跟磁盘一点关系没有（实测日志：146G 盘、清理后 109G 可用）。
+# 10G 能过是因为 bs=10240M = 10GiB，16GB 内存勉强能分配；12G 以上越来越险。
+#
+# 改法：bs 换成固定的 1M（缓冲区只要 1MiB），再用 truncate 把结果扩到目标大小。
+# dd 负责把 squashfs 复制出来并补齐到 1M 边界，truncate 负责撑到 20G 的
+# 逻辑大小 —— 中间是空洞，稀疏，不占实际磁盘。产物与原来完全一致。
+#
+# 只在模式真的存在时才动手，上游哪天改了就自动跳过，不留死补丁。
+_IMK="include/image.mk"
+if [ -f "$_IMK" ] && grep -q 'of=$(1).new bs=$(2) conv=sync' "$_IMK" 2>/dev/null; then
+    # 一条 sed 完成：把整行换成「bs=1M」+ 新起一行 truncate。
+    # 替换串里的 \n 换行、\t 制表符由 sed 解释 —— Makefile 的 recipe 行必须以
+    # tab 开头，少了 tab 会报 "missing separator"，所以这里必须显式补 \t。
+    sed -i 's|dd if=$(1) of=$(1).new bs=$(2) conv=sync|dd if=$(1) of=$(1).new bs=1M conv=sync\n\ttruncate -s $(2) $(1).new|' "$_IMK"
+    if grep -q 'truncate -s $(2) $(1).new' "$_IMK" 2>/dev/null; then
+        echo "==> [patch] Image/pad-to 已改：bs=1M + truncate -s \$(2)（避开 20GiB 缓冲）"
+    else
+        echo "::error::Image/pad-to 补丁没写进去，20G 档仍会 OOM，终止"
+        exit 1
+    fi
+else
+    echo "==> [patch] Image/pad-to 未命中（上游可能已改），跳过"
+fi
+
 mkdir -p /home/build/immortalwrt/files/etc/config
 
 # custom/ 由 workflow 挂到 /home/build/immortalwrt/custom（v.108.9）。
