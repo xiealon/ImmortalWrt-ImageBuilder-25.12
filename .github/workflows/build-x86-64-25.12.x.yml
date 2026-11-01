@@ -411,13 +411,52 @@ jobs:
             echo "- 镜像来源: ${CSS:-未知}"
           } > "${{ github.workspace }}/router-info.md"
 
+      # 为什么要在上传前改名：
+      #   六个档位产出的文件名上游是固定的，都是
+      #     immortalwrt-<ver>-x86-64-generic-squashfs-combined-efi.img.gz
+      #   Release 的 tag 也是固定的 Autobuild-x86-64，softprops 遇到同名 asset 会直接覆盖。
+      #   结果就是「先做 8G，再做 16G」之后，8G 那份被 16G 那份吃掉。
+      #   这里按实际 rootfs 分区大小插一个后缀，六个档位各占一份，互不覆盖。
+      #   后缀取的是 rootfs 的真实 MB 值换算出的 G（4096/10240/22528/51200/110592/229376
+      #   都能整除 1024），所以文件名和分区实际大小是一一对应的，不存在名实不符。
+      - name: 产物文件名加档位后缀（避免不同档位互相覆盖）
+        run: |
+          set -e
+          cd "${{ github.workspace }}/bin/targets/x86/64"
+          MB="${ROOTFS_SIZE:?ROOTFS_SIZE 为空，无法判定档位}"
+          if [ $(( MB % 1024 )) -eq 0 ]; then
+            SUF="$(( MB / 1024 ))G"
+          else
+            SUF="${MB}M"
+          fi
+          echo "==> rootfs=${MB}MB，文件名后缀 -${SUF}"
+          n=0
+          for f in *-combined-efi.img.gz *-rootfs.tar.gz; do
+            [ -f "$f" ] || continue
+            case "$f" in
+              *.img.gz) new="${f%.img.gz}-${SUF}.img.gz" ;;
+              *.tar.gz) new="${f%.tar.gz}-${SUF}.tar.gz" ;;
+              *) continue ;;
+            esac
+            mv -f "$f" "$new"
+            echo "  $f"
+            echo "    -> $new"
+            n=$((n + 1))
+          done
+          if [ "$n" -eq 0 ]; then
+            echo "::error::没找到待改名的产物，bin/targets/x86/64 当前内容："
+            ls -l
+            exit 1
+          fi
+          echo "==> 共改名 $n 个文件"
+
       - name: Upload ImmortalWrt Release Assets
         uses: softprops/action-gh-release@v3
         with:
           tag_name: Autobuild-x86-64
           body_path: ${{ github.workspace }}/router-info.md
           files: |
-            ${{ github.workspace }}/bin/targets/x86/64/*squashfs-combined-efi.img.gz
+            ${{ github.workspace }}/bin/targets/x86/64/*-combined-efi*.img.gz
           token: ${{ secrets.GITHUB_TOKEN }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
