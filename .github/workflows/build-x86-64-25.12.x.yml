@@ -46,8 +46,24 @@ on:
       # 的机器再装 ssr-plus / daed 这类带一串依赖的包就没地方了，留着只会让人选错。
       # 注意 default 必须同步改成选项内的值 —— 否则 workflow_dispatch 会因为
       # 默认值不在 options 里直接报错，连页面都打不开。
+      # 【大容量档：按「硬盘标称」选，根分区不是标称值】
+      # 32G/64G/128G/256G 四档照硬盘规格给，rootfs 已经替你扣掉两样东西：
+      #   1) 厂商标称按 10^9 算，换算成 GiB 要乘 0.9313：
+      #      32G→29.8GiB、64G→59.6GiB、128G→119.2GiB、256G→238.4GiB
+      #      （实际盘还会再小几百 MB，杂牌 U 盘更明显）
+      #   2) 预留 swap：32G 档留 6G，64G/128G/256G 各留 8G。
+      #      注意 swap 要你自己在设备上建（分区或 swapfile），固件不代劳。
+      # 最后再留 1.5~6G 给分区表 / EFI / kernel / 四舍五入。折算结果：
+      #      32G  盘 → rootfs 22G（22528）   22 + 6 swap = 28，余 ~1.8G
+      #      64G  盘 → rootfs 50G（51200）   50 + 8 swap = 58，余 ~1.6G
+      #      128G 盘 → rootfs 108G（110592） 108 + 8 swap = 116，余 ~3.2G
+      #      256G 盘 → rootfs 224G（229376） 224 + 8 swap = 232，余 ~6.4G
+      # 【16G / 20G 两档删除】不是嫌小，是物理上装不下：
+      #      16G 盘实际只有 14.9GiB，20G 盘只有 18.6GiB，把 16GiB / 20GiB 的
+      #      rootfs 刷进去必然超出盘尾。留着它就是「选了就变砖」的选项。
+      #      要 16G 盘就用 14G 档（14.336 + 分区开销刚好塞得下）。
       Profile:
-        description: '软件包空间大小（最低 10G：内置 CrowdSec 容器的 rootfs 需要；2G~8G 已下线）'
+        description: '软件包空间大小。10G/12G/14G = 裸分区大小；32G/64G/128G/256G = 按硬盘标称选（已扣 swap，实际 rootfs 为 22G/50G/108G/224G）'
         required: true
         type: choice
         default: '10G'
@@ -55,8 +71,10 @@ on:
           - '10G'
           - '12G'
           - '14G'
-          - '16G'
-          - '20G'
+          - '32G'
+          - '64G'
+          - '128G'
+          - '256G'
       Enable Store:
         description: "集成 store 商店"
         required: false
@@ -141,9 +159,9 @@ jobs:
           # 档位只认 10G 起。传了别的值（旧脚本、API 调用、手敲）一律失败，
           # 不要「自动纠正」成 10G —— 那样出来的固件和填的对不上，比报错更难查。
           case "$CS_PROFILE" in
-            10G|12G|14G|16G|20G) ;;
+            10G|12G|14G|32G|64G|128G|256G) ;;
             *)
-              echo "::error::Profile=$CS_PROFILE 不合法：只支持 10G/12G/14G/16G/20G（10G 以下已下线），请重选后重跑"
+              echo "::error::Profile=$CS_PROFILE 不合法：只支持 10G/12G/14G/32G/64G/128G/256G，请重选后重跑"
               exit 1
               ;;
           esac
@@ -329,13 +347,21 @@ jobs:
         run: |
           profile="${{ github.event.inputs['Profile'] }}"
           case "$profile" in
-            10G) ROOTFS_SIZE=10240 ;;
-            12G) ROOTFS_SIZE=12288 ;;
-            14G) ROOTFS_SIZE=14336 ;;
-            16G) ROOTFS_SIZE=16384 ;;
-            20G) ROOTFS_SIZE=20480 ;;
+            10G)  ROOTFS_SIZE=10240  ;;
+            12G)  ROOTFS_SIZE=12288  ;;
+            14G)  ROOTFS_SIZE=14336  ;;
+            # 下面四档按硬盘标称给值，rootfs 已扣掉「标称→GiB 的 0.9313 损耗」+ swap：
+            #   32G 盘 29.8GiB - 6G swap - 约 1.8G 余量 = 22G
+            #   64G 盘 59.6GiB - 8G swap - 约 1.6G 余量 = 50G
+            #   128G 盘 119.2GiB - 8G swap - 约 3.2G 余量 = 108G
+            #   256G 盘 238.4GiB - 8G swap - 约 6.4G 余量 = 224G
+            # 余量要留着：分区表 + EFI 分区 + 32M kernel + 不同牌子盘的实际容量差。
+            32G)  ROOTFS_SIZE=22528  ;;
+            64G)  ROOTFS_SIZE=51200  ;;
+            128G) ROOTFS_SIZE=110592 ;;
+            256G) ROOTFS_SIZE=229376 ;;
             *)
-              echo "::error::未知 profile=$profile（可选 10G/12G/14G/16G/20G）"
+              echo "::error::未知 profile=$profile（可选 10G/12G/14G/32G/64G/128G/256G）"
               exit 1
               ;;
           esac
