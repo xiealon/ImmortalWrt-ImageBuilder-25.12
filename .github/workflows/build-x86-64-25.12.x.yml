@@ -116,8 +116,11 @@ jobs:
     # 所以下面会把实际用到的版本写进 Release 说明（router-info.md），保证可回溯。
     env:
       CROWDSEC_VERSION: ""
-    # docker run / git clone 卡住会吃满 6 小时默认上限，显式收口
-    timeout-minutes: 120
+    # docker run / git clone 卡住会吃满 6 小时默认上限，显式收口。
+    # 120 -> 180：大档位不是「产物变大」，是压缩器要把整个分区的逻辑字节读一遍。
+    # 本支用 libdeflate-gzip，零数据实测比 zlib 快 2~3 倍，224G 单遍约 10~15 分钟，
+    # 两遍 20~30 分钟；但仍与 24.10 保持同一上限，免得两个仓库的窗口不一致。
+    timeout-minutes: 180
 
     steps:
       - name: Checkout Code
