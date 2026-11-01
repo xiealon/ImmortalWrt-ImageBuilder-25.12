@@ -424,12 +424,30 @@ jobs:
           set -e
           cd "${{ github.workspace }}/bin/targets/x86/64"
           MB="${ROOTFS_SIZE:?ROOTFS_SIZE 为空，无法判定档位}"
+          # 盘标称按 MB 写死映射，不解析下拉框文本，避免拿中文做 shell 模式匹配。
+          # 这是档位表的第四处硬编码：下拉框 / 白名单 / ROOTFS_SIZE 映射 / 这里，改档位时一起改。
+          case "$MB" in
+            4096)   DISK=8G   ;;
+            10240)  DISK=16G  ;;
+            22528)  DISK=32G  ;;
+            51200)  DISK=64G  ;;
+            110592) DISK=128G ;;
+            229376) DISK=256G ;;
+            *)      DISK=""   ;;
+          esac
           if [ $(( MB % 1024 )) -eq 0 ]; then
-            SUF="$(( MB / 1024 ))G"
+            RFS="$(( MB / 1024 ))G"
           else
-            SUF="${MB}M"
+            RFS="${MB}M"
           fi
-          echo "==> rootfs=${MB}MB，文件名后缀 -${SUF}"
+          # 两个都带上：盘标称 + rootfs 实际大小，例如 disk8G-rootfs4G。
+          # 文件名因此同时说明「装哪块盘」和「分区多大」，不会出现 8G 的名字配 4G 的分区这种歧义。
+          if [ -n "$DISK" ]; then
+            SUF="disk${DISK}-rootfs${RFS}"
+          else
+            SUF="rootfs${RFS}"
+          fi
+          echo "==> rootfs=${MB}MB，盘标称=${DISK:-未知}，文件名后缀 -${SUF}"
           n=0
           for f in *-combined-efi.img.gz *-rootfs.tar.gz; do
             [ -f "$f" ] || continue
