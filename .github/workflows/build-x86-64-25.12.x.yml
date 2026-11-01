@@ -66,17 +66,17 @@ on:
       #      都装不下同名的 rootfs（12GiB 的 rootfs 塞不进 11.2GiB 的盘），
       #      留着就是「选了就变砖」的选项。
       Profile:
-        description: '软件包空间大小，按硬盘标称选：8G=4G rootfs、16G=10G、32G=22G、64G=50G、128G=108G、256G=224G'
+        description: '格式「硬盘标称→rootfs 分区」。左边是你手上那块盘的标称容量（非实际容量，实际约标称×0.93，还要扣分区表/EFI 和预留 swap）；右边才是固件真正建出来的 rootfs 大小'
         required: true
         type: choice
-        default: '16G'
+        default: '16G盘→rootfs 10G'
         options:
-          - '8G'
-          - '16G'
-          - '32G'
-          - '64G'
-          - '128G'
-          - '256G'
+          - '8G盘→rootfs 4G'
+          - '16G盘→rootfs 10G'
+          - '32G盘→rootfs 22G'
+          - '64G盘→rootfs 50G'
+          - '128G盘→rootfs 108G'
+          - '256G盘→rootfs 224G'
       Enable Store:
         description: "集成 store 商店"
         required: false
@@ -160,10 +160,12 @@ jobs:
 
           # 档位只认下面白名单里的值。传了别的（旧脚本、API 调用、手敲）一律失败，
           # 不要「自动纠正」到最接近的档 —— 那样出来的固件和填的对不上，比报错更难查。
+          # 注意：Profile 的选项文本是「8G盘→rootfs 4G」这种自带标注的串，
+          # 所以这里一律用前缀匹配（8G盘*）。若改成精确匹配，以后动一下标注文案就全线报错。
           case "$CS_PROFILE" in
-            8G|16G|32G|64G|128G|256G) ;;
+            8G盘*|16G盘*|32G盘*|64G盘*|128G盘*|256G盘*) ;;
             *)
-              echo "::error::Profile=$CS_PROFILE 不合法：只支持 8G/16G/32G/64G/128G/256G，请重选后重跑"
+              echo "::error::Profile=$CS_PROFILE 不合法：只支持 8G盘/16G盘/32G盘/64G盘/128G盘/256G盘，请重选后重跑"
               exit 1
               ;;
           esac
@@ -349,20 +351,20 @@ jobs:
         run: |
           profile="${{ github.event.inputs['Profile'] }}"
           case "$profile" in
-            8G)   ROOTFS_SIZE=4096   ;;
-            16G)  ROOTFS_SIZE=10240  ;;
+            8G盘*)   ROOTFS_SIZE=4096   ;;
+            16G盘*)  ROOTFS_SIZE=10240  ;;
             # 下面四档按硬盘标称给值，rootfs 已扣掉「标称→GiB 的 0.9313 损耗」+ swap：
             #   32G 盘 29.8GiB - 6G swap - 约 1.8G 余量 = 22G
             #   64G 盘 59.6GiB - 8G swap - 约 1.6G 余量 = 50G
             #   128G 盘 119.2GiB - 8G swap - 约 3.2G 余量 = 108G
             #   256G 盘 238.4GiB - 8G swap - 约 6.4G 余量 = 224G
             # 余量要留着：分区表 + EFI 分区 + 32M kernel + 不同牌子盘的实际容量差。
-            32G)  ROOTFS_SIZE=22528  ;;
-            64G)  ROOTFS_SIZE=51200  ;;
-            128G) ROOTFS_SIZE=110592 ;;
-            256G) ROOTFS_SIZE=229376 ;;
+            32G盘*)  ROOTFS_SIZE=22528  ;;
+            64G盘*)  ROOTFS_SIZE=51200  ;;
+            128G盘*) ROOTFS_SIZE=110592 ;;
+            256G盘*) ROOTFS_SIZE=229376 ;;
             *)
-              echo "::error::未知 profile=$profile（可选 8G/16G/32G/64G/128G/256G）"
+              echo "::error::未知 profile=$profile（可选 8G盘→4G / 16G盘→10G / 32G盘→22G / 64G盘→50G / 128G盘→108G / 256G盘→224G）"
               exit 1
               ;;
           esac
