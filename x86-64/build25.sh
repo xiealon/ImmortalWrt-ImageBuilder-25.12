@@ -74,6 +74,48 @@ else
     echo "==> [patch] Image/pad-to 未命中（上游可能已改），跳过"
 fi
 
+# 【v.180.200】gen_image_generic.sh 里那条 dd if=/dev/zero —— 大档位爆盘的真因。
+#
+# combined.img.gz / combined-efi.img.gz 这两条不走 pad-to，而是走 Build/combined
+# → scripts/gen_image_generic.sh，里面有这么一行：
+#   [ -n "$PADDING" ] && dd if=/dev/zero of="$OUTPUT" bs=512 seek="$ROOTFSOFFSET" conv=notrunc count="$ROOTFSSIZE"
+# 注意 ROOTFSSIZE 这里是**扇区数**：256G 档 = 469762048 扇区 = 224GiB，
+# 而且没有 conv=sparse —— dd 会把这 224GiB 零实打实写进磁盘。
+# runner 总共 146G，写到剩 109G 时 ENOSPC，表现就是「卡在 dd 那行不动」，
+# 最后 No space left on device。
+#
+# 改法：整行换成 truncate，直接把文件长度撑到「kernel 区 + rootfs 区 + GPT 备份区」。
+# truncate 只改 inode 长度、不写数据，中间全是空洞，磁盘占用仍是几百 MB；
+# 而 gzip 读到的逻辑长度不变，分区大小照样是 224G。
+_GIS="scripts/gen_image_generic.sh"
+if [ -f "$_GIS" ] && grep -q 'dd if=/dev/zero of="\$OUTPUT" bs=512 seek="\$ROOTFSOFFSET"' "$_GIS" 2>/dev/null; then
+    if ! command -v truncate >/dev/null 2>&1; then
+        echo "::error::容器里没有 truncate，大分区档会写满磁盘，终止"
+        exit 1
+    fi
+    # 不用 sed：这条正则里 [ ] & $ 全是元字符，转义错一个就静默改坏脚本。
+    # 改成「按行号切三段、中间整行换掉」——纯文本匹配，行为可预期。
+    _LN=$(grep -n 'dd if=/dev/zero of="\$OUTPUT" bs=512 seek="\$ROOTFSOFFSET"' "$_GIS" | head -n1 | cut -d: -f1)
+    if [ -n "$_LN" ]; then
+        {
+            head -n $((_LN - 1)) "$_GIS"
+            printf '%s\n' '[ -n "$PADDING" ] && truncate -s $(( (ROOTFSOFFSET + ROOTFSSIZE + ${sect:-0}) * 512 )) "$OUTPUT"'
+            tail -n +$((_LN + 1)) "$_GIS"
+        } > /tmp/gis.new
+        # 用 cat 覆盖而不是 mv：这个脚本是直接被执行的，要保住原文件的权限位
+        cat /tmp/gis.new > "$_GIS" && rm -f /tmp/gis.new
+    fi
+    if grep -q 'truncate -s \$(( (ROOTFSOFFSET + ROOTFSSIZE' "$_GIS" 2>/dev/null && \
+       [ "$(grep -c 'dd if=/dev/zero of="\$OUTPUT" bs=512 seek="\$ROOTFSOFFSET"' "$_GIS")" = "0" ]; then
+        echo "==> [patch] gen_image_generic.sh 已改：写零 dd 换成 truncate（大档位不再爆盘）"
+    else
+        echo "::error::gen_image_generic.sh 没改成功，128G/256G 档会写满磁盘后失败，终止"
+        exit 1
+    fi
+else
+    echo "==> [patch] gen_image_generic.sh 未命中（上游可能已改），跳过"
+fi
+
 mkdir -p /home/build/immortalwrt/files/etc/config
 
 # custom/ 由 workflow 挂到 /home/build/immortalwrt/custom（v.108.9）。
