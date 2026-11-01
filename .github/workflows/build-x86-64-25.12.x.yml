@@ -40,10 +40,9 @@ on:
       # "未知 profile=10G" exit 1。那是映射漏了一段，不是磁盘问题。
       # 教训：下拉框 / 白名单 / 映射 这三处必须永远一起改，只改一处就是埋雷。
       # 注意「分区大小」和「固件大小」是两件事：img 里未使用的空间全是零，
-      # gzip 压完仍然只有几百 MB，20G 分区出的固件也能正常下载/刷写。
-      # 档位整体上移到 10G 起，2G/3G/4G/6G/8G 全部下线。
-      # 理由：内置 CrowdSec 容器的 rootfs + 离线包库本身就吃掉大头，2G/3G 出来
-      # 的机器再装 ssr-plus / daed 这类带一串依赖的包就没地方了，留着只会让人选错。
+      # gzip 压完仍然只有几百 MB，224G 分区出的固件也能正常下载/刷写。
+      # 档位语义（重要）：2G~8G 那批「裸分区」档已经放弃，改成「你的盘多大就选多大」。
+      # 没有例外档：12G 已删，现在每个档位都对应一块真实存在、且装得下的硬盘。
       # 注意 default 必须同步改成选项内的值 —— 否则 workflow_dispatch 会因为
       # 默认值不在 options 里直接报错，连页面都打不开。
       # 【大容量档：按「硬盘标称」选，根分区不是标称值】
@@ -58,21 +57,22 @@ on:
       #      64G  盘 → rootfs 50G（51200）   50 + 8 swap = 58，余 ~1.6G
       #      128G 盘 → rootfs 108G（110592） 108 + 8 swap = 116，余 ~3.2G
       #      256G 盘 → rootfs 224G（229376） 224 + 8 swap = 232，余 ~6.4G
-      # 【16G / 20G 两档删除】不是嫌小，是物理上装不下：
-      #      16G 盘实际只有 14.9GiB，20G 盘只有 18.6GiB，把 16GiB / 20GiB 的
-      #      rootfs 刷进去必然超出盘尾。留着它就是「选了就变砖」的选项。
-      # 【14G 档一并删除】16G 盘实际只有 14.9GiB，装 14.336G 的 rootfs 只余 0.56G，
-      #      还要放分区表 + EFI 分区 + 32M kernel；很多 16G U 盘更是只剩 14.4GiB。
-      #      刷进去起不来，还是「选了就变砖」。留个压线档不如不留：16G 盘用 12G 档。
-      #      于是 12G 之后直接跳到 32G —— 这段空档是有意的，13~29G 没有能用的盘。
+      # 【小盘档：8G / 16G 按硬盘标称，rootfs 都留了余量】
+      #   8G  盘 7.45GiB → rootfs 4G（4096），余 3.4G 给分区表 / EFI / 2~3G swap
+      #   16G 盘 14.9GiB → rootfs 10G（10240），余 4.9G 给分区表 / EFI / 4G swap
+      # 两档都不是压线：16G 盘装 10G rootfs 还剩 4.9G，够放 4G swap 加分区表；
+      # 8G 盘装 4G rootfs 还剩 3.4G。
+      # 【10G / 12G / 20G 已删】10G 盘 9.3GiB、12G 盘 11.2GiB、20G 盘 18.6GiB，
+      #      都装不下同名的 rootfs（12GiB 的 rootfs 塞不进 11.2GiB 的盘），
+      #      留着就是「选了就变砖」的选项。
       Profile:
-        description: '软件包空间大小。10G/12G = 裸分区大小；32G/64G/128G/256G = 按硬盘标称选（已扣 swap，实际 rootfs 为 22G/50G/108G/224G）'
+        description: '软件包空间大小，按硬盘标称选：8G=4G rootfs、16G=10G、32G=22G、64G=50G、128G=108G、256G=224G'
         required: true
         type: choice
-        default: '10G'
+        default: '16G'
         options:
-          - '10G'
-          - '12G'
+          - '8G'
+          - '16G'
           - '32G'
           - '64G'
           - '128G'
@@ -158,12 +158,12 @@ jobs:
           echo "容器网络（固定值，来自 rootfs-skel）: IP=$CS_CT_IP 网关/DNS=$CS_BRIDGE_IP 掩码=255.255.255.0"
           echo "::notice::容器 IP/网关/DNS 固定为 $CS_CT_IP / $CS_BRIDGE_IP；要改请改 rootfs-skel/etc/crowdsec-net.conf 并重新构建"
 
-          # 档位只认 10G 起。传了别的值（旧脚本、API 调用、手敲）一律失败，
-          # 不要「自动纠正」成 10G —— 那样出来的固件和填的对不上，比报错更难查。
+          # 档位只认下面白名单里的值。传了别的（旧脚本、API 调用、手敲）一律失败，
+          # 不要「自动纠正」到最接近的档 —— 那样出来的固件和填的对不上，比报错更难查。
           case "$CS_PROFILE" in
-            10G|12G|32G|64G|128G|256G) ;;
+            8G|16G|32G|64G|128G|256G) ;;
             *)
-              echo "::error::Profile=$CS_PROFILE 不合法：只支持 10G/12G/32G/64G/128G/256G，请重选后重跑"
+              echo "::error::Profile=$CS_PROFILE 不合法：只支持 8G/16G/32G/64G/128G/256G，请重选后重跑"
               exit 1
               ;;
           esac
@@ -349,8 +349,8 @@ jobs:
         run: |
           profile="${{ github.event.inputs['Profile'] }}"
           case "$profile" in
-            10G)  ROOTFS_SIZE=10240  ;;
-            12G)  ROOTFS_SIZE=12288  ;;
+            8G)   ROOTFS_SIZE=4096   ;;
+            16G)  ROOTFS_SIZE=10240  ;;
             # 下面四档按硬盘标称给值，rootfs 已扣掉「标称→GiB 的 0.9313 损耗」+ swap：
             #   32G 盘 29.8GiB - 6G swap - 约 1.8G 余量 = 22G
             #   64G 盘 59.6GiB - 8G swap - 约 1.6G 余量 = 50G
@@ -362,7 +362,7 @@ jobs:
             128G) ROOTFS_SIZE=110592 ;;
             256G) ROOTFS_SIZE=229376 ;;
             *)
-              echo "::error::未知 profile=$profile（可选 10G/12G/32G/64G/128G/256G）"
+              echo "::error::未知 profile=$profile（可选 8G/16G/32G/64G/128G/256G）"
               exit 1
               ;;
           esac
