@@ -1,4 +1,4 @@
-# 这是什么
+# IP网关DNS为固定，修改进入ETC/CONFIG/下文件夹内修改三个对应文件
 
 ![这是什么 · 九组链式置位](docs/bp-nine-group-flow.png)
 
