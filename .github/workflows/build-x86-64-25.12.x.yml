@@ -456,7 +456,12 @@ jobs:
               *.tar.gz) new="${f%.tar.gz}-${SUF}.tar.gz" ;;
               *) continue ;;
             esac
-            mv -f "$f" "$new"
+            # 产物是 docker run --user root 在容器内创建的，bin/targets/x86/64
+            # 目录属主也是 root，runner 用户对该目录没有写权限。
+            # 同目录内改名只要求目录可写，这里目录不可写，直接 mv 会 Permission denied，
+            # 所以必须借 sudo（hosted runner 的 sudo 免密）。
+            # 文件属主仍为 root，但权限 644，后面的 Upload 以 runner 身份读取不受影响。
+            sudo mv -f "$f" "$new"
             echo "  $f"
             echo "    -> $new"
             n=$((n + 1))
