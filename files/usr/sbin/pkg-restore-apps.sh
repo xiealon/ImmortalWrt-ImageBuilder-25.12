@@ -101,11 +101,16 @@ _RESTORE="${RESTORE_BIN:-/usr/sbin/pkg-restore.sh}"
 # 里有没有对应的 apk。两个都 yes 才留在这张表里 —— 只有前者没有后者的包，
 # 判出缺失也装不回来，每轮只是白报一次警。
 #
-# 留下的 14 个包全部 firmware=yes + pkg=yes：
+# 留下的 17 个包全部 firmware=yes + pkg=yes：
 #   clashoo / luci-app-clashoo / luci-i18n-clashoo-zh-cn
 #   honk / luci-app-honk / luci-lib-daeuniverse / luci-i18n-daeuniverse-zh-cn /
 #   vmlinux-btf-builtin
+#   mosdns / luci-app-mosdns / luci-i18n-mosdns-zh-cn
+#   sing-box
 #   v2ray-geoip / v2ray-geosite（2026-11-02 补入，只判包不判文件，见 _PA_GEO）
+#   adblock / luci-app-adblock / luci-i18n-adblock-zh-cn（2026-11-02 补入，见 _PA_ADBLOCK；
+#     这三包 pkg=yes 的前提是把它们收进 build25.sh 的 _AK_WANT —— 当日实测包库
+#     116 个 apk 里 adblock 相关 0 个，光加保护组修不动，已一并收进白名单）
 #
 # vmlinux-btf-builtin 为什么也算 honk 组的一员（2026-11-02 真机核实）：
 #   它是 honk 的硬依赖，但 installed size 只有 1 B —— 唯一内容是自己的
@@ -166,6 +171,22 @@ _PA_GEO="v2ray-geoip v2ray-geosite"
 # sing-box 是通用代理内核，原挂在 ssrp 组里，现在单独一组。
 # 它的 kmod 依赖（inet-diag / netlink-diag / tun）同样归 --deps 管。
 _PA_COMMON="sing-box"
+# 【2026-11-02】adblock 组（用户当日定：先留着，并且保护起来）。
+# 三个包是一条依赖链，只写 i18n 也会把 adblock 本体拉进来，所以整链一起护。
+#
+# 本组能判两层：
+#   ① 包被 apk del  → _pa_should 命中出厂 P:adblock → 缺失 → 从包库装回，记账与文件一起回；
+#   ② 包在、文件被删 → _pa_files_ok 判 /etc/init.d/adblock 与 /usr/bin/adblock.sh
+#                      （实测 adblock.list 11 行里只有这两个命中 case，
+#                       /www/cgi-bin/adblock 与 /etc/adblock/* 不在 case 范围内，
+#                       所以删界面或规则文件这一层不报 —— 需要时报的是包，不是文件）。
+#
+# 刻意**不**把 adblock 三包加进 pkg-restore.sh 的 _DEPS_PKGS：
+# 那边是整份 .list 逐路径从 /rom 拷回，会把 /etc/adblock/adblock.allowlist、
+# adblock.blocklist、adblock.custom.feeds 这些**用户自己加的规则**按出厂版覆盖掉。
+# 这与 /etc/config/ 全目录排除是同一条理由（保护动作制造它要防的故障）：
+# 用户规则被删，宁可让他知道缺了，也不要悄悄换成一份空白的出厂白名单。
+_PA_ADBLOCK="adblock luci-app-adblock luci-i18n-adblock-zh-cn"
 
 # 【2026-11-02】daed 在 25.12 线已被 honk 取代（用户定），原来的 geo 软链接判据一并删除：
 #   honk 的规则集不走 /usr/share/daed/*.dat 软链接，而是按 native_api.geosite_download_url /
@@ -173,7 +194,7 @@ _PA_COMMON="sing-box"
 #   honk 是官方 daeuniverse 源的包，预装进固件后 /rom/lib/apk/db/installed 有 P:honk，
 #   _pa_should 照常命中；被 force-remove 时同样能判出来。
 
-_PA_LIST="${CS_PROBE_APPS:-$_PA_CLASHOO $_PA_HONK $_PA_MOSDNS $_PA_COMMON $_PA_GEO}"
+_PA_LIST="${CS_PROBE_APPS:-$_PA_CLASHOO $_PA_HONK $_PA_MOSDNS $_PA_COMMON $_PA_GEO $_PA_ADBLOCK}"
 
 log() { printf '[APP] %s\n' "$*"; }
 
