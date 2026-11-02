@@ -103,7 +103,15 @@ _RESTORE="${RESTORE_BIN:-/usr/sbin/pkg-restore.sh}"
 #
 # 留下的 12 个包全部 firmware=yes + pkg=yes：
 #   clashoo / luci-app-clashoo / luci-i18n-clashoo-zh-cn
-#   honk / luci-app-honk / luci-lib-daeuniverse
+#   honk / luci-app-honk / luci-lib-daeuniverse / vmlinux-btf-builtin
+#
+# vmlinux-btf-builtin 为什么也算 honk 组的一员（2026-11-02 真机核实）：
+#   它是 honk 的硬依赖，但 installed size 只有 1 B —— 唯一内容是自己的
+#   lib/apk/packages/vmlinux-btf-builtin.list。apk 的 Depends 里写死了它，
+#   删掉之后 honk 的依赖链就断，apk 任何一次操作都可能顺手把 honk 也带走。
+#   它同时是个哨兵：pre-install 会检查 /sys/kernel/btf/vmlinux，内核没自带
+#   BTF 的机器装不上它 —— 反过来说，它在册就等于「这台机器的内核 BTF 是好的」。
+#   恢复走 _pr_tree 从 /rom 拷文件，不需要 apk 源，所以保护是真的生效。
 #   mosdns / luci-app-mosdns / luci-i18n-mosdns-zh-cn
 #   sing-box
 #
@@ -129,7 +137,7 @@ _RESTORE="${RESTORE_BIN:-/usr/sbin/pkg-restore.sh}"
 #   libopenssl3        固件库有、包库无 → 装不回；且它是全系统的 TLS 底座，
 #                      不属于某一个应用的依赖
 _PA_CLASHOO="clashoo luci-app-clashoo luci-i18n-clashoo-zh-cn"
-_PA_HONK="honk luci-app-honk luci-lib-daeuniverse"
+_PA_HONK="honk luci-app-honk luci-lib-daeuniverse vmlinux-btf-builtin"
 # mosdns 组仍不含 v2ray-geoip / v2ray-geosite（v.180.166 用户定）：
 # 通用 geo 数据包上游一直在更新，按本地包库装回旧版会把人的新版本拽回老版本。
 _PA_MOSDNS="mosdns luci-app-mosdns luci-i18n-mosdns-zh-cn"
