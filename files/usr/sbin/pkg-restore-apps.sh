@@ -3,7 +3,7 @@
 #
 # 为什么有这支脚本（用户 2026-10-29 定，判据取向见 crowdsec-lxc-probe.sh L219-231）：
 #   探针只做两件事 —— 探测 + 拉脚本，自己不动手装包。
-#   honk / mosdns / clashoo 这三个应用不像 smartdns 那样接管 53
+#   honk / clashoo 这两个应用不像 smartdns 那样接管 53
 #   （ssrp 已于 v.180.165 整组移除，理由见清单处的说明），
 #   所以不判进程、不判端口，只判包在不在册；缺了由本脚本装回。
 #   【v.180.164】判定粒度从「主程序一个包」扩到「主程序 + 依赖内核 + LuCI 界面」：
@@ -35,12 +35,10 @@
 #   真实动机：clashoo 包里装的是 /usr/bin/mihomo 与 /usr/bin/clash-meta，包名与二进制名
 #   毫无关系。只判包名时这两个被删，--check 返回 0、探针 appbad 恒为 0 ——
 #   功能已死，日志全绿。24.10 线 2026-10-30 真机复现（192.168.1.201）：
-#     rm /usr/bin/mosdns → pkg-restore-apps.sh --check → rc=0
-#   覆盖范围（24.10 线真机实测，12 个包 86 个文件里落在判据内的 9 个）：
+#   把包内二进制单独删掉后，--check 仍返回 0、探针 appbad 恒为 0。
+#   覆盖范围（各包落在判据内的文件）：
 #     clashoo           /usr/bin/mihomo /usr/bin/clash-meta /etc/init.d/clashoo
 #     honk              /usr/bin/honk-core /etc/init.d/honk
-#     luci-app-mosdns   /etc/init.d/mosdns
-#     mosdns            /usr/bin/mosdns
 #     sing-box          /usr/bin/sing-box /etc/init.d/sing-box
 #   25.12 的清单格式相同（一行一个绝对路径），但未在 25.12 新机上逐包复测路径覆盖率。
 #   LuCI 壳与 i18n（6 个包）的文件都在 /usr/share、/usr/lib/lua，判据内 0 行 → 恒放行，
@@ -77,7 +75,6 @@ _RESTORE="${RESTORE_BIN:-/usr/sbin/pkg-restore.sh}"
 #
 #   clashoo 组：内核就在主包里（control: Provides: mihomo, clash-meta，Installed-Size 46.5MB）
 #   honk 组：  eBPF 程序，vmlinux-btf 是运行时前提，缺了 honk-core 直接起不来
-#   mosdns 组：geo 数据包是规则来源，缺了 mosdns 空转
 #   ssrp 组：已整组移除，见下方 v.180.165 说明
 #
 # 【v.180.165】ssrp 组整组删除（用户 2026-10-29 定）。理由两条：
@@ -101,11 +98,10 @@ _RESTORE="${RESTORE_BIN:-/usr/sbin/pkg-restore.sh}"
 # 里有没有对应的 apk。两个都 yes 才留在这张表里 —— 只有前者没有后者的包，
 # 判出缺失也装不回来，每轮只是白报一次警。
 #
-# 留下的 17 个包全部 firmware=yes + pkg=yes：
+# 留下的 14 个包全部 firmware=yes + pkg=yes：
 #   clashoo / luci-app-clashoo / luci-i18n-clashoo-zh-cn
 #   honk / luci-app-honk / luci-lib-daeuniverse / luci-i18n-daeuniverse-zh-cn /
 #   vmlinux-btf-builtin
-#   mosdns / luci-app-mosdns / luci-i18n-mosdns-zh-cn
 #   sing-box
 #   v2ray-geoip / v2ray-geosite（2026-11-02 补入，只判包不判文件，见 _PA_GEO）
 #   adblock / luci-app-adblock / luci-i18n-adblock-zh-cn（2026-11-02 补入，见 _PA_ADBLOCK；
@@ -119,7 +115,6 @@ _RESTORE="${RESTORE_BIN:-/usr/sbin/pkg-restore.sh}"
 #   它同时是个哨兵：pre-install 会检查 /sys/kernel/btf/vmlinux，内核没自带
 #   BTF 的机器装不上它 —— 反过来说，它在册就等于「这台机器的内核 BTF 是好的」。
 #   恢复走 _pr_tree 从 /rom 拷文件，不需要 apk 源，所以保护是真的生效。
-#   mosdns / luci-app-mosdns / luci-i18n-mosdns-zh-cn
 #   sing-box
 #
 # 内核模块全部移出本表，改由 pkg-restore.sh --deps 做文件级恢复。
@@ -152,9 +147,6 @@ _PA_CLASHOO="clashoo luci-app-clashoo luci-i18n-clashoo-zh-cn"
 # 少了它 honk 那页会退回英文，看上去像「能用」，实际是缺件。它同样在包库里
 # （build25.sh 的 honk 保护组断言盯着这 5 个），所以装得回来，够格进这张表。
 _PA_HONK="honk luci-app-honk luci-lib-daeuniverse luci-i18n-daeuniverse-zh-cn vmlinux-btf-builtin"
-# mosdns 组仍不含 v2ray-geoip / v2ray-geosite（v.180.166 用户定）：
-# 通用 geo 数据包上游一直在更新，按本地包库装回旧版会把人的新版本拽回老版本。
-_PA_MOSDNS="mosdns luci-app-mosdns luci-i18n-mosdns-zh-cn"
 # 【2026-11-02】geo 数据单独成组：包级判据（apk info -e），不判文件。
 #
 # 这一组负责的只是「包被人 apk del 掉」——装回时连文件带记账一起回来。
@@ -194,7 +186,7 @@ _PA_ADBLOCK="adblock luci-app-adblock luci-i18n-adblock-zh-cn"
 #   honk 是官方 daeuniverse 源的包，预装进固件后 /rom/lib/apk/db/installed 有 P:honk，
 #   _pa_should 照常命中；被 force-remove 时同样能判出来。
 
-_PA_LIST="${CS_PROBE_APPS:-$_PA_CLASHOO $_PA_HONK $_PA_MOSDNS $_PA_COMMON $_PA_GEO $_PA_ADBLOCK}"
+_PA_LIST="${CS_PROBE_APPS:-$_PA_CLASHOO $_PA_HONK $_PA_COMMON $_PA_GEO $_PA_ADBLOCK}"
 
 log() { printf '[APP] %s\n' "$*"; }
 
