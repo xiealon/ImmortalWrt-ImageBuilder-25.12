@@ -27,7 +27,13 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-timewol-zh-cn"
 
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-3ginfo-lite-zh-cn"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-acme-zh-cn"
-CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-adblock-zh-cn"
+# 【2026-11-02】用户定：去掉 adblock。这里原来只有 luci-i18n-adblock-zh-cn，
+# 但它是一条依赖链的入口：i18n → luci-app-adblock → adblock，整套 3 个都会被装。
+# 当日固件实测：adblock-4.5.9-r4、luci-app-adblock-4.5.9-r2、
+# luci-i18n-adblock-zh-cn-26.298.29275~c84adb9 三个都在；
+# apk info -r adblock 显示只被 luci-app-adblock 依赖，而 imm25.config 里
+# CONFIG_PACKAGE_adblock / CONFIG_PACKAGE_luci-app-adblock 都是 not set。
+# 所以删掉这一行，整条链自然不进固件，不必动 config。
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-aria2-zh-cn"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-banip-zh-cn"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-cifs-mount-zh-cn"
