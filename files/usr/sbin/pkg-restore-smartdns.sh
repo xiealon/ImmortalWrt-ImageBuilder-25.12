@@ -133,6 +133,33 @@ _sd_conf() {
     return 0
 }
 
+# 关键文件检测：五个规则文件「基座有、运行期没有」就算不完整。0=齐, 1=缺。
+#
+# 为什么必须单独判：_sd_serve() 只判「进程在 + 53 归它」，两条都与
+# /etc/smartdns/*.conf 在不在无关 —— smartdns 启动时把配置读进内存，
+# 运行中删文件既不影响 pidof 也不影响 socket，--check 照样返 0。
+# 而探针的 _up_svc 直接转调 --check、rc.local 也拿它当门票，于是
+# 「文件没了」两个自动入口都看不见，_sd_conf() 永远等不到调用。
+# 2026-11-02 真机实测（192.168.1.201，删 /etc/smartdns/address.conf）：
+#   --check  → rc=0（看不见）
+#   --repair → 补回 1 个文件、824 B（能力是有的，就是没人触发）
+#   rc.local / 探针在 100 秒内均无动作。
+# 判据与 _sd_conf() 共用同一份 SD_CONF_FILES —— 判定与恢复各写一份清单的话，
+# 加文件时漏一处就会出现「判得出、补不回」或反过来的静默失效。
+# 只看「基座有、运行期没有」：基座本来就没有的（老固件/精简固件没编这些规则）
+# 不算缺，否则每轮都判坏、又永远补不回来，只会把通道锁死在 warn。
+_sd_conf_ok() {
+    _sc_miss=0
+    for _sc_f in $SD_CONF_FILES; do
+        [ -e "$ROMDIR/etc/smartdns/$_sc_f" ] || continue
+        if [ ! -e "$PKGROOT/etc/smartdns/$_sc_f" ]; then
+            printf '[PKG] 缺规则文件：/etc/smartdns/%s\n' "$_sc_f" >&2
+            _sc_miss=1
+        fi
+    done
+    [ "$_sc_miss" = 0 ]
+}
+
 # 界面是否可用。三段判据，都不碰包管理器（apk / opkg 通用）：
 #   ① 运行期在位                                   → 0
 #   ② 只读基座里有、运行期没有（该有却没有）        → 1，要恢复
@@ -370,7 +397,14 @@ case "${1:-}" in
     _sd_config && exit 0 || exit 1
     ;;
 --check)
-    _sd_serve && exit 0 || exit 1
+    # 两段都必须过：服务在跑（53 归 smartdns）+ 五个规则文件在位。
+    # 只判前者时，「文件被删、进程还活着」会一直判好（配置在内存里，pidof 和
+    # socket 都不受影响），两个自动入口（探针 _up_svc / rc.local 门票）就都瞎，
+    # _sd_conf() 永远等不到调用 —— 2026-11-02 真机实测：删 address.conf 后
+    # --check 返 0，探针 100 秒无动作。判定清单与 _sd_conf() 共用 SD_CONF_FILES。
+    _sd_serve || exit 1
+    _sd_conf_ok || exit 1
+    exit 0
     ;;
 --check-pkg)
     _sd_pkg_ok && exit 0 || exit 1

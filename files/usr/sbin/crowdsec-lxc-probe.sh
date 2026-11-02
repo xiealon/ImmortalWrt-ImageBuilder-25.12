@@ -274,7 +274,13 @@ _up_run() {
 # 脚本文件本身不在位时返回 0（放行）：那是 pkg-restore 的事，不该让 DNS 通道误报。
 _up_svc() {
     [ -x "$_SD_RESTORE" ] || return 0
-    "$_SD_RESTORE" --check >/dev/null 2>&1
+    # 失败原因要能看见：--check 现在有两种坏法（53 未接管 / 五个规则文件缺失）。
+    # 原来是 >/dev/null 2>&1 一刀切丢掉，日志里只剩「53 未由 smartdns 接管」，
+    # 排障时容易往 53 方向白查。输出转 syslog（tag 与探针分开），退出码原样返回。
+    _us_out="$("$_SD_RESTORE" --check 2>&1)"
+    _us_rc=$?
+    [ "$_us_rc" = "0" ] || printf '%s\n' "$_us_out" | logger -t crowdsec-probe-sd 2>/dev/null
+    return "$_us_rc"
 }
 
 # 持锁跑一轮 bootstrap，等它结束，回收锁。返回它的退出码；77 = 抢锁失败。
@@ -321,7 +327,7 @@ _up_watch() {
     # 所以二进制不在 → --check 必然失败 → 判坏 → 第 3 轮交 --config（含装包）。
     # 装不回来时 _sd_pkg 返回 1 → 连续失败照数 → 最终喊人，不静默。
     _uw_why=""
-    _up_svc || _uw_why="53 未由 smartdns 接管"
+    _up_svc || _uw_why="smartdns 未就绪（53 未接管或规则文件缺，详见 crowdsec-probe-sd）"
     _uw_n=$(_up_n)
     case "$_uw_n" in ''|*[!0-9]*) _uw_n=0 ;; esac
     if [ "$_uw_n" -le 0 ]; then
