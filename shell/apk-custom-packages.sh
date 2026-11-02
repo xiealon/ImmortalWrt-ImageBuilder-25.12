@@ -7,8 +7,11 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-lucky lucky luci-i18n-lucky-zh-cn"
 # honk：25.12 上替代 daed 的 eBPF 代理引擎（硬要求内核 6.12+）。
 # doona 管理界面内嵌在 honk-core 里，访问 http://<LAN IP>:9527/（必须用 IP，不认主机名）。
 # luci-app-honk 只负责 Services → honk 的启停/升级，节点与路由仍在 doona 里配。
-# @daeuniverse tag 对应 build25.sh 里 EXTRA_APK_REPOS 挂的官方源。
-CUSTOM_PACKAGES="$CUSTOM_PACKAGES honk@daeuniverse luci-app-honk@daeuniverse"
+# 包来自 xiealon/CloudRunFilesBuilder 的 honk-apk Release，由 build25.sh 下到 packages/，
+# 所以这里不带 @tag —— 走的是本地包，不是 apk 源。
+# luci-lib-daeuniverse 是 luci-app-honk 的运行依赖；vmlinux-btf-builtin 是 BTF 哨兵，
+# 显式列出是为了让「缺包」在构建期就暴露，而不是靠依赖解析碰运气。
+CUSTOM_PACKAGES="$CUSTOM_PACKAGES honk luci-app-honk luci-lib-daeuniverse luci-i18n-daeuniverse-zh-cn vmlinux-btf-builtin"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES geoview sing-box luci-compat kmod-tun kmod-inet-diag kmod-nft-tproxy kmod-nft-socket bash curl lua unzip"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES clashoo luci-app-clashoo luci-i18n-clashoo-zh-cn"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES yq kmod-dummy ca-bundle"

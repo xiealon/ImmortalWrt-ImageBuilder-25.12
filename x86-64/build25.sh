@@ -206,13 +206,43 @@ else
 fi
 
 REPOS_CONF="/home/build/immortalwrt/repositories.conf"
-# honk（25.12 的 daed 替代）：官方 daeuniverse 源。
-# 必须带 @daeuniverse tag —— apk 只有在显式要求时才从这个源取包，
-# 否则同名包（如 vmlinux-btf-builtin）会顶掉系统自带的。
-# 签名公钥在 shell/apk-keys/daeuniverse.pem，由下面的 keys 拷贝逻辑带入。
-# 25.12 才有 tag 语义；24.10 是 opkg 无 tag，不用这个源（且 6.6 内核跑不了 honk）。
-if [ -z "$EXTRA_APK_REPOS" ]; then
-    EXTRA_APK_REPOS="@daeuniverse https://openwrt.daeuniverse.org/25.12/packages/x86_64/packages.adb"
+# honk：apk 改从自家的 CloudRunFilesBuilder Release 取，不再挂 daeuniverse 第三方源。
+# 为什么换：openwrt.daeuniverse.org 是上游 beta 期临时源，包随时可能被撤；
+# 而 honk-apk Release 是同一套 apk 的镜像，版本由 CloudRunFilesBuilder 定时跟踪。
+# 落点与 OpenClash 一致（packages/），make image 会把它当本地包装进固件。
+# 依赖一并取：luci-app-honk 要 luci-lib-daeuniverse；vmlinux-btf-builtin 是 BTF 哨兵，
+# 装前检查 /sys/kernel/btf/vmlinux，缺了 honk-core 起不来。
+if echo "$PACKAGES" | grep -q "honk"; then
+    _hk_api="https://api.github.com/repos/xiealon/CloudRunFilesBuilder/releases/tags/honk-apk"
+    echo "==> honk: 读取 Release 资产清单"
+    echo "    $_hk_api"
+    _hk_json=$(wget -qO- --timeout=30 --tries=3 "$_hk_api" 2>/dev/null) || _hk_json=""
+    if [ -z "$_hk_json" ]; then
+        echo "::error::honk: 取不到 honk-apk Release 资产清单（网络不通或 Release 不存在）"
+        exit 1
+    fi
+    _hk_n=0
+    for _hk_pkg in honk luci-app-honk luci-lib-daeuniverse luci-i18n-daeuniverse-zh-cn vmlinux-btf-builtin; do
+        _hk_url=$(printf '%s' "$_hk_json" \
+            | grep -oE "\"https://[^\"]*/${_hk_pkg}-[0-9][^\"]*\.apk\"" \
+            | tr -d '"' | head -n1)
+        if [ -z "$_hk_url" ]; then
+            echo "::error::honk: Release 里没有 ${_hk_pkg}-*.apk"
+            exit 1
+        fi
+        echo "    ↓ $(basename "$_hk_url")"
+        wget -q "$_hk_url" -P /home/build/immortalwrt/packages/ \
+            || { echo "::error::honk: 下载失败 $_hk_url"; exit 1; }
+        _hk_n=$((_hk_n + 1))
+    done
+    echo "✅ honk: $_hk_n 个 apk 已进 packages/（版本随 Release 走）"
+    ls -l /home/build/immortalwrt/packages/honk-*.apk \
+          /home/build/immortalwrt/packages/luci-app-honk-*.apk \
+          /home/build/immortalwrt/packages/luci-lib-daeuniverse-*.apk \
+          /home/build/immortalwrt/packages/luci-i18n-daeuniverse-zh-cn-*.apk \
+          /home/build/immortalwrt/packages/vmlinux-btf-builtin-*.apk 2>/dev/null || true
+else
+    echo "⚪️ 未选择 honk"
 fi
 if [ -n "$EXTRA_APK_REPOS" ] && [ -f "$REPOS_CONF" ]; then
     echo "🔗 加挂第三方 apk 源:"
