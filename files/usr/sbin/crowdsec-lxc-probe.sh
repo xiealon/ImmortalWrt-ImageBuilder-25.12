@@ -327,7 +327,20 @@ _up_watch() {
     # 所以二进制不在 → --check 必然失败 → 判坏 → 第 3 轮交 --config（含装包）。
     # 装不回来时 _sd_pkg 返回 1 → 连续失败照数 → 最终喊人，不静默。
     _uw_why=""
-    _up_svc || _uw_why="smartdns 未就绪（53 未接管或规则文件缺，详见 crowdsec-probe-sd）"
+    _uw_mode="config"      # 修法：config → --config（重写+重启），conf → --conf（只补文件）
+    _up_svc
+    _uw_svc=$?
+    # 【2026-11-02】--check 现在返三态，按「坏在哪一层」选修法（见脚本里的说明）：
+    #   0 = 好；1 = 服务没起来；3 = 服务正常、只有五个规则文件缺。
+    # 只有 3 能走零中断路径 —— 文件在内存里，进程和 socket 都没受影响，拷回去即可。
+    # 其余（含任何非预期 rc）一律按硬故障走 --config，宁可多重启一次，不留半修状态。
+    if [ "$_uw_svc" = "3" ]; then
+        _uw_why="规则文件缺失（53 仍由 smartdns 接管）"
+        _uw_mode="conf"
+    elif [ "$_uw_svc" != "0" ]; then
+        _uw_why="smartdns 未就绪（53 未接管或二进制缺失，详见 crowdsec-probe-sd）"
+        _uw_mode="config"
+    fi
     _uw_n=$(_up_n)
     case "$_uw_n" in ''|*[!0-9]*) _uw_n=0 ;; esac
     if [ "$_uw_n" -le 0 ]; then
@@ -336,6 +349,8 @@ _up_watch() {
         else
             _uw_why="上游 0 条"
         fi
+        # 上游要写回 uci，--conf 只管文件 —— 不管原来判的是哪一层，都升级到 --config。
+        _uw_mode="config"
     fi
     if [ -z "$_uw_why" ]; then
         # 【2026-10-31.1130】P_UP_BAD 在下面的 --config 之前就被清零了，所以「修好之后
@@ -379,24 +394,34 @@ _up_watch() {
     # 【2026-10-31.1130】置标记：本轮修过，等下一轮复核。修好了就在判好分支打「已恢复」，
     # 见那个分支里的说明。不持久化（只影响跨重启的一条日志，不影响任何判定）。
     P_UP_OK=1
-    # --config 会重写主段、13 条上游、commit 并重启 smartdns（约 15 秒），
-    # 所以必须放在冷却闸门之后，不能每轮都来一次。
+    # 【2026-11-02】修法跟着故障层走，不再一律 --config：
+    #   软故障（只有规则文件缺、53 正常）→ --conf：只 cp 文件回 /etc/smartdns，
+    #     不碰 uci、不 commit、不 restart，全程零中断；
+    #   硬故障（53 未接管 / 二进制缺失 / 上游 0 条）→ --config：装包 + 重写主段 +
+    #     13 条上游 + commit + 重启 smartdns（约 15 秒中断），所以必须放在冷却闸门之后。
+    # 原先不管哪种坏法都重启一次，等于「删了个 conf 文件」也要掉 15 秒 DNS。
+    _uw_cmd="--config"
+    _uw_desc="重写配置与 13 条上游（会重启 smartdns）"
+    if [ "$_uw_mode" = "conf" ]; then
+        _uw_cmd="--conf"
+        _uw_desc="只补规则文件（不重启，不掉 DNS）"
+    fi
     P_ACTION="up-repair"
-    plog "【DNS】$_uw_why 连续 ${PROBE_STALL_ROUNDS} 轮，交 pkg-restore-smartdns.sh --config 重写配置与 13 条上游"
-    if _up_run --config; then
+    plog "【DNS】$_uw_why 连续 ${PROBE_STALL_ROUNDS} 轮，交 pkg-restore-smartdns.sh $_uw_cmd：$_uw_desc"
+    if _up_run "$_uw_cmd"; then
         P_UP_FIX=0
         P_ACTION="up-fixed"
-        plog "【DNS】已写回：下一轮复核 53 与上游条数"
+        plog "【DNS】已写回（$_uw_cmd）：下一轮复核 53 与上游条数"
         return 0
     fi
     P_UP_FIX=$((${P_UP_FIX:-0} + 1))
     if [ "$P_UP_FIX" -ge "$PROBE_FAIL_ALERT" ]; then
         P_ACTION="up-need-human"
         P_HUMAN_UP=1
-        plog "【DNS】【需人工介入】--config 连续 $P_UP_FIX 次未能写回。依次查：53 是否被别的进程占着（netstat -lnup | grep :53）、/etc/config/smartdns 是否可写、uci 是否被锁、/etc/smartdns 下规则文件是否被遮"
+        plog "【DNS】【需人工介入】$_uw_cmd 连续 $P_UP_FIX 次未能写回。依次查：53 是否被别的进程占着（netstat -lnup | grep :53）、/etc/config/smartdns 是否可写、uci 是否被锁、/etc/smartdns 下规则文件是否被遮"
     else
         P_ACTION="up-fix-fail"
-        plog "【DNS】--config 未能写回（连续第 $P_UP_FIX/${PROBE_FAIL_ALERT} 次）"
+        plog "【DNS】$_uw_cmd 未能写回（连续第 $P_UP_FIX/${PROBE_FAIL_ALERT} 次）"
     fi
     return 0
 }
