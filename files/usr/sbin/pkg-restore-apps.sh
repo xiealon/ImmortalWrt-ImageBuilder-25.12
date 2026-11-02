@@ -3,7 +3,7 @@
 #
 # 为什么有这支脚本（用户 2026-10-29 定，判据取向见 crowdsec-lxc-probe.sh L219-231）：
 #   探针只做两件事 —— 探测 + 拉脚本，自己不动手装包。
-#   daed / mosdns / clashoo 这三个应用不像 smartdns 那样接管 53
+#   honk / mosdns / clashoo 这三个应用不像 smartdns 那样接管 53
 #   （ssrp 已于 v.180.165 整组移除，理由见清单处的说明），
 #   所以不判进程、不判端口，只判包在不在册；缺了由本脚本装回。
 #   【v.180.164】判定粒度从「主程序一个包」扩到「主程序 + 依赖内核 + LuCI 界面」：
@@ -20,8 +20,9 @@
 #                                   0 = 全部在位；1 = 仍有缺（或装不上）
 #
 # 判据主体是包管理器认不认。本版写死 apk（25.12 线只有 apk）：apk info -e。
-# 【v.180.167】唯一例外：daed-geoip / daed-geosite 的运行数据是软链接，包在册
-# 但链接断了同样算「缺失」—— 详见 _pa_data_ok 上方的说明。
+# 【2026-11-02】原 daed-geoip / daed-geosite 的软链接例外随 daed 一并移除
+# （25.12 线改用 honk）；honk 的规则集由 native_api 自己下载到 data_dir，
+# 不依赖 /usr/share 下的软链接，包在册即视为数据齐备。
 #   【v.180.192】补齐文件级判据（用户 2026-10-30 定）。原来这里写的是「不看文件清单」，
 #   理由是清单随版本漂 / 文件缺失 ≠ 功能缺失 / 两判据混用会死循环。这三条在
 #   「包完整在册、二进制被单独删掉」这种形态上都不成立：
@@ -37,7 +38,7 @@
 #     rm /usr/bin/mosdns → pkg-restore-apps.sh --check → rc=0
 #   覆盖范围（24.10 线真机实测，12 个包 86 个文件里落在判据内的 9 个）：
 #     clashoo           /usr/bin/mihomo /usr/bin/clash-meta /etc/init.d/clashoo
-#     daed              /usr/bin/daed /etc/init.d/daed
+#     honk              /usr/bin/honk-core /etc/init.d/honk
 #     luci-app-mosdns   /etc/init.d/mosdns
 #     mosdns            /usr/bin/mosdns
 #     sing-box          /usr/bin/sing-box /etc/init.d/sing-box
@@ -46,7 +47,7 @@
 #   仍只靠记账判。这是有意的：那类文件删了顶多界面缺项，不会像二进制那样静默失去功能。
 #
 # 【关键】「该不该有」的门槛：只恢复固件里本来就带的那个应用。
-#   否则一台根本没装 daed 的机器，探针每轮都判「缺」、每轮装一次，装上了再被
+#   否则一台根本没装 honk 的机器，探针每轮都判「缺」、每轮装一次，装上了再被
 #   用户卸掉，又装 —— 就不是修复是强加。判据取 /rom 侧留下的痕迹（apk 域）：
 #     · /rom/lib/apk/db/installed —— 固件出厂的已安装库，P:<包名> 一行一个
 #   不准拿 /rom/root/apk-cache/<包>-*.apk 当判据：那是兜底包库，收的包远多于
@@ -75,12 +76,12 @@ _RESTORE="${RESTORE_BIN:-/usr/sbin/pkg-restore.sh}"
 #   ③ LuCI 界面（luci-app-* / luci-i18n-*）—— 少了用户看不见入口，等同于坏了
 #
 #   clashoo 组：内核就在主包里（control: Provides: mihomo, clash-meta，Installed-Size 46.5MB）
-#   daed 组：  eBPF 程序，vmlinux-btf 是运行时前提，缺了 daed 直接起不来
+#   honk 组：  eBPF 程序，vmlinux-btf 是运行时前提，缺了 honk-core 直接起不来
 #   mosdns 组：geo 数据包是规则来源，缺了 mosdns 空转
 #   ssrp 组：已整组移除，见下方 v.180.165 说明
 #
 # 【v.180.165】ssrp 组整组删除（用户 2026-10-29 定）。理由两条：
-#   ① daed 已经能替代它，没有必要再维护一套 ssr-plus；
+#   ① honk 已经能替代它，没有必要再维护一套 ssr-plus；
 #   ② ssr-plus 的依赖链太长 —— xray-core / xray-plugin / v2ray-plugin /
 #      三套 shadowsocksr-libev / trojan-plus / tuic / shadow-tls / naiveproxy /
 #      simple-obfs-client，每轮 _pa_missing 都要逐包问一次包管理器，
@@ -102,7 +103,7 @@ _RESTORE="${RESTORE_BIN:-/usr/sbin/pkg-restore.sh}"
 #
 # 留下的 12 个包全部 firmware=yes + pkg=yes：
 #   clashoo / luci-app-clashoo / luci-i18n-clashoo-zh-cn
-#   daed / daed-geoip / daed-geosite / luci-app-daed / luci-i18n-daed-zh-cn
+#   honk / luci-app-honk / luci-lib-daeuniverse
 #   mosdns / luci-app-mosdns / luci-i18n-mosdns-zh-cn
 #   sing-box
 #
@@ -128,7 +129,7 @@ _RESTORE="${RESTORE_BIN:-/usr/sbin/pkg-restore.sh}"
 #   libopenssl3        固件库有、包库无 → 装不回；且它是全系统的 TLS 底座，
 #                      不属于某一个应用的依赖
 _PA_CLASHOO="clashoo luci-app-clashoo luci-i18n-clashoo-zh-cn"
-_PA_DAED="daed daed-geoip daed-geosite luci-app-daed luci-i18n-daed-zh-cn"
+_PA_HONK="honk luci-app-honk luci-lib-daeuniverse"
 # mosdns 组仍不含 v2ray-geoip / v2ray-geosite（v.180.166 用户定）：
 # 通用 geo 数据包上游一直在更新，按本地包库装回旧版会把人的新版本拽回老版本。
 _PA_MOSDNS="mosdns luci-app-mosdns luci-i18n-mosdns-zh-cn"
@@ -136,26 +137,13 @@ _PA_MOSDNS="mosdns luci-app-mosdns luci-i18n-mosdns-zh-cn"
 # 它的 kmod 依赖（inet-diag / netlink-diag / tun）同样归 --deps 管。
 _PA_COMMON="sing-box"
 
-# 【v.180.167】daed 的 geo 数据是软链接，真实文件由 v2ray-geoip / v2ray-geosite 提供：
-#   /usr/share/daed/geoip.dat    -> ../v2ray/geoip.dat
-#   /usr/share/daed/geosite.dat  -> ../v2ray/geosite.dat
-# 用户 2026-10-29 实测确认后定：apk del --force-depends v2ray-geoip 会让这两个链接
-# 断掉，而 daed-geoip 包本身仍在册 —— 只判包名完全看不到这种「包在、数据没了」的
-# 形态，daed 会在启动时静默失去规则集。所以对这两个包再加一条「链接可读」判据。
-#
-# 为什么升级 v2ray-geoip 不会误判（用户最关心的那点）：
-#   · 软链接指向的是**路径**而不是 inode；apk 升级是原地替换
-#     /usr/share/v2ray/geoip.dat，该路径全程存在 → 判据恒真，不会因为换了新版
-#     就判成断链。
-#   · 即使某一瞬文件正在被替换，探针这边也要连续 3 轮（60s × 3 = 180s）才动作，
-#     毫秒级的窗口凑不满 3 轮，不会触发装回。
-#   · 万一真的断链触发装回，装的是 daed-geoip（已在册 → 装包是空操作），不会把
-#     用户刚升级的 v2ray-geoip 拽回旧版；而真被人 force-remove 掉的那种情况，
-#     装回旧版也比彻底没有规则集强。
-_PA_LINK_DAED_GEOIP=/usr/share/daed/geoip.dat
-_PA_LINK_DAED_GEOSITE=/usr/share/daed/geosite.dat
+# 【2026-11-02】daed 在 25.12 线已被 honk 取代（用户定），原来的 geo 软链接判据一并删除：
+#   honk 的规则集不走 /usr/share/daed/*.dat 软链接，而是按 native_api.geosite_download_url /
+#   geoip_download_url 自己下到 data_dir（默认 /etc/honk/data），包在册即认定数据齐备。
+#   honk 是官方 daeuniverse 源的包，预装进固件后 /rom/lib/apk/db/installed 有 P:honk，
+#   _pa_should 照常命中；被 force-remove 时同样能判出来。
 
-_PA_LIST="${CS_PROBE_APPS:-$_PA_CLASHOO $_PA_DAED $_PA_MOSDNS $_PA_COMMON}"
+_PA_LIST="${CS_PROBE_APPS:-$_PA_CLASHOO $_PA_HONK $_PA_MOSDNS $_PA_COMMON}"
 
 log() { printf '[APP] %s\n' "$*"; }
 
@@ -182,12 +170,11 @@ _pa_should() {
 }
 
 # 已装包的「运行数据还在吗」补充判据（v.180.167）。
-# 只对 daed 的两个 geo 包生效：它们的运行数据是软链接，包在册不等于数据在。
-# 其余包没有这种「包在、数据另存」的结构，直接算好。
+# 原来只对 daed 的两个 geo 包生效（软链接断链要算缺失）。
+# 【2026-11-02】daed 在 25.12 线被 honk 取代，本线已无「包在、数据另存」的包，
+# case 里不再有任何具体分支；函数保留是为了调用点不用改，也方便日后加新判据。
 _pa_data_ok() {
     case "$1" in
-    daed-geoip)   [ -r "$_PA_LINK_DAED_GEOIP" ] ;;
-    daed-geosite) [ -r "$_PA_LINK_DAED_GEOSITE" ] ;;
     *)            return 0 ;;
     esac
 }

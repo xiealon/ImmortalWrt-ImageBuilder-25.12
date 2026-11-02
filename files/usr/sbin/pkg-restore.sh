@@ -304,7 +304,10 @@ _pr_host() {
 _DEPS_ROM_LIST="$ROMDIR/lib/apk/packages"
 
 # 【v.180.182】补 v2ray-geoip / v2ray-geosite（用户 2026-10-29 定）。
-# 这两个是 daed 的规则来源：daed 不直接读它们，读的是两条软链接
+# 【2026-11-02】daed 已在 25.12 线被 honk 取代，honk 不读 /usr/share/v2ray 下这两份文件
+# （规则集由 native_api.geosite_download_url / geoip_download_url 自己下到 data_dir）。
+# 它们仍留在表里只作通用 geo 数据兜底：判据恒真时不动任何字节，被删才从 /rom 拷回。
+# 原来的背景是 daed：daed 不直接读它们，读的是两条软链接
 #   /usr/share/daed/geoip.dat   -> ../v2ray/geoip.dat
 #   /usr/share/daed/geosite.dat -> ../v2ray/geosite.dat
 # 所以真正会「没」的是 /usr/share/v2ray/ 下这两个实体文件（各 19MB / 10MB）。

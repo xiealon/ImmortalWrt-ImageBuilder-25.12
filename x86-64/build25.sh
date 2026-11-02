@@ -206,6 +206,14 @@ else
 fi
 
 REPOS_CONF="/home/build/immortalwrt/repositories.conf"
+# honk（25.12 的 daed 替代）：官方 daeuniverse 源。
+# 必须带 @daeuniverse tag —— apk 只有在显式要求时才从这个源取包，
+# 否则同名包（如 vmlinux-btf-builtin）会顶掉系统自带的。
+# 签名公钥在 shell/apk-keys/daeuniverse.pem，由下面的 keys 拷贝逻辑带入。
+# 25.12 才有 tag 语义；24.10 是 opkg 无 tag，不用这个源（且 6.6 内核跑不了 honk）。
+if [ -z "$EXTRA_APK_REPOS" ]; then
+    EXTRA_APK_REPOS="@daeuniverse https://openwrt.daeuniverse.org/25.12/packages/x86_64/packages.adb"
+fi
 if [ -n "$EXTRA_APK_REPOS" ] && [ -f "$REPOS_CONF" ]; then
     echo "🔗 加挂第三方 apk 源:"
     echo "$EXTRA_APK_REPOS"
@@ -485,7 +493,6 @@ lxc-unshare lxc-usernsexec lxc-wait liblxc rpcd-mod-lxc
 luci-app-lxc luci-i18n-lxc-zh-cn
 smartdns luci-app-smartdns
 mosdns
-daed daed-geoip daed-geosite luci-app-daed luci-i18n-daed-zh-cn
 crowdsec-firewall-bouncer luci-app-crowdsec-firewall-bouncer
 luci-i18n-crowdsec-firewall-bouncer-zh-cn nftables-json
 v2ray-geoip v2ray-geosite sing-box"
