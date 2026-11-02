@@ -206,6 +206,48 @@ else
 fi
 
 REPOS_CONF="/home/build/immortalwrt/repositories.conf"
+# ---- 【2026-11-02】修正 GitHub Release 资产名：`~` 被规范化成 `.` ----
+# run #18（head 7be1d3d）实测失败，三个包同时报：
+#   ERROR: luci-app-honk-26.303.60580~1046d3c: package mentioned in index not found
+#   ERROR: luci-lib-daeuniverse-26.303.64947~503cdb1: ...
+#   ERROR: luci-i18n-daeuniverse-zh-cn-26.303.60580~1046d3c: ...
+# 根因是两个名字不一致：
+#   Release 资产名  luci-app-honk-26.303.60580.1046d3c.apk     （GitHub 把 ~ 换成 .）
+#   包内 pkgver     26.303.60580~1046d3c                       （apk adbdump 读出）
+# make image 装包时按 name-version.apk 拼文件名去仓库取，磁盘上却是 . 版本 → not found。
+# 反证：honk-0.1.0_beta4-r3.apk 与 vmlinux-btf-builtin-1-r1.apk 版本里没有 ~，
+# 同一次构建里装得好好的 —— 所以问题只在被改名的那些资产上。
+# GitHub 只改资产名、不动包内容，下载后按包内 name/version 改回来即可。
+_gh_apk=""
+_gh_fixname() {
+    _gf_f="$1"
+    [ -s "$_gf_f" ] || { echo "::error::改名：文件不存在或为空 $_gf_f（下载没拿到内容）"; return 1; }
+    if [ -z "$_gh_apk" ]; then
+        for _gc in "$(pwd)/staging_dir/host/bin/apk" "$(pwd)/staging_dir/host/bin/apk.static"; do
+            [ -x "$_gc" ] && _gh_apk="$_gc" && break
+        done
+        [ -n "$_gh_apk" ] || _gh_apk="$(command -v apk 2>/dev/null)"
+    fi
+    [ -n "$_gh_apk" ] || { echo "::error::改名：找不到 apk 工具，读不出包内 pkgver"; return 1; }
+    _gf_nv=$("$_gh_apk" adbdump "$_gf_f" 2>/dev/null \
+        | sed -n 's/^  name: //p; s/^  version: //p' | head -n2 | tr '\n' ' ')
+    _gf_n=${_gf_nv%% *}
+    _gf_v=${_gf_nv#* }
+    _gf_v=${_gf_v% }
+    if [ -z "$_gf_n" ] || [ -z "$_gf_v" ]; then
+        echo "::error::改名：读不出包内 name/version（$_gf_f）"
+        return 1
+    fi
+    _gf_want="$(dirname "$_gf_f")/${_gf_n}-${_gf_v}.apk"
+    [ "$_gf_f" = "$_gf_want" ] && return 0
+    if mv -f "$_gf_f" "$_gf_want" 2>/dev/null; then
+        echo "    ↻ $(basename "$_gf_f") → $(basename "$_gf_want")"
+        return 0
+    fi
+    echo "::error::改名失败：$_gf_f → $_gf_want"
+    return 1
+}
+
 # honk：apk 改从自家的 CloudRunFilesBuilder Release 取，不再挂 daeuniverse 第三方源。
 # 为什么换：openwrt.daeuniverse.org 是上游 beta 期临时源，包随时可能被撤；
 # 而 honk-apk Release 是同一套 apk 的镜像，版本由 CloudRunFilesBuilder 定时跟踪。
@@ -233,6 +275,9 @@ if echo "$PACKAGES" | grep -q "honk"; then
         echo "    ↓ $(basename "$_hk_url")"
         wget -q "$_hk_url" -P /home/build/immortalwrt/packages/ \
             || { echo "::error::honk: 下载失败 $_hk_url"; exit 1; }
+        # GitHub 把资产名里的 ~ 换成 .，包内 pkgver 仍是 ~ —— 必须改回来，
+        # 否则 make image 的 package_install 找不到文件（run #18 就是这么挂的）
+        _gh_fixname "/home/build/immortalwrt/packages/$(basename "$_hk_url")" || exit 1
         _hk_n=$((_hk_n + 1))
     done
     echo "✅ honk: $_hk_n 个 apk 已进 packages/（版本随 Release 走）"
@@ -244,6 +289,15 @@ if echo "$PACKAGES" | grep -q "honk"; then
 else
     echo "⚪️ 未选择 honk"
 fi
+
+# OpenClash 的 apk 也是直接从 GitHub Release 下的，资产名同样会被 GitHub 把 ~
+# 换成 .（本次没选 openclash，未实测，但风险与 honk 同源）。
+# _gh_fixname 定义在上面，这里补一刀；没选时通配符不匹配，循环空转。
+for _oc_f in packages/luci-app-openclash-*.apk; do
+    [ -f "$_oc_f" ] || continue
+    _gh_fixname "$_oc_f" || exit 1
+done
+
 if [ -n "$EXTRA_APK_REPOS" ] && [ -f "$REPOS_CONF" ]; then
     echo "🔗 加挂第三方 apk 源:"
     echo "$EXTRA_APK_REPOS"
