@@ -469,9 +469,13 @@ _apps_watch() {
 }
 
 # ---- 应用依赖的文件级通道（v.180.181）----
-# 盯 18 个包、72 个文件：9 个 kmod 的 26 个 .ko 与 9 个 modules.d 配置，
+# 盯 18 个包、73 条路径：9 个 kmod 的 26 个 .ko 与 9 个 modules.d 配置，
 # 加 ca-bundle / libcap / yq / ip-full / firewall4 / coreutils-nohup / libopenssl3，
-# 以及 v2ray-geoip / v2ray-geosite 的两个 .dat（v.180.182 补入，daed 的规则来源）。
+# 以及 v2ray-geoip / v2ray-geosite 的 3 条（两个 .dat + 一条软链接）。
+# 【2026-11-02】geo 这几条保留在这条通道里，专管「包还在、文件被删」：
+# 判据只判存在与非空，不比内容、不比版本 —— 用户换过新数据不会被按回旧版；
+# 真删了才从 /rom 拷回，保证「最起码有的用」。包被 apk del 的那一种归
+# pkg-restore-apps.sh 的 _PA_GEO（包级）。
 # **不含内核本体**（/boot/vmlinuz 与其余模块都不管，内核坏了重刷固件）。
 # **不含 /etc/config/**（UCI 配置归 bootstrap 管，恢复出厂基底反而会拆掉 lxc zone）。
 # 为什么必须走文件级：kmod-* 在固件出厂库里有、包库里没有 apk，apk add 无处可装；
@@ -1031,7 +1035,7 @@ P_APP_BAD=0
 P_APP_TRIG=0
 P_APP_FIX=0
 P_HUMAN_APP=0
-# 【v.180.181】应用依赖的文件级通道（18 包 / 72 文件，不含 /etc/config）
+# 【v.180.181】应用依赖的文件级通道（18 包 / 73 条路径，不含 /etc/config）
 P_KMOD_BAD=0
 P_KMOD_TRIG=0
 P_KMOD_FIX=0

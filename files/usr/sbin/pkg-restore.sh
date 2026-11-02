@@ -303,24 +303,27 @@ _pr_host() {
 # /rom/usr/lib/opkg/info 有 692 份 .list，18 个保护包一份都不少。
 _DEPS_ROM_LIST="$ROMDIR/lib/apk/packages"
 
-# 【v.180.182】补 v2ray-geoip / v2ray-geosite（用户 2026-10-29 定）。
-# 【2026-11-02】daed 已在 25.12 线被 honk 取代，honk 不读 /usr/share/v2ray 下这两份文件
-# （规则集由 native_api.geosite_download_url / geoip_download_url 自己下到 data_dir）。
-# 它们仍留在表里只作通用 geo 数据兜底：判据恒真时不动任何字节，被删才从 /rom 拷回。
-# 原来的背景是 daed：daed 不直接读它们，读的是两条软链接
-#   /usr/share/daed/geoip.dat   -> ../v2ray/geoip.dat
-#   /usr/share/daed/geosite.dat -> ../v2ray/geosite.dat
-# 所以真正会「没」的是 /usr/share/v2ray/ 下这两个实体文件（各 19MB / 10MB）。
-# 为什么放在文件级而不是包级：
-#   包级判据（_pa_data_ok 的软链接可读）能发现断链，但恢复动作是装 daed-geoip ——
-#   包本来就已装，装包是空操作，修不好。实测过这个组合：能发现、修不了。
-# 为什么不会锁版本（这是最初不肯纳入的理由）：
-#   判据只判「存在且非空」，不比内容、不比 md5、不比大小。用户从 clashoo 或
-#   手动换了新版 → 文件非空 → 判据恒真 → 一个字都不动。只有被删/被清空
-#   （whiteout 那种）才从 /rom 拷回出厂版救急，拷完用户自己再更新即可。
-# 不纳入 daed-geoip / daed-geosite 这两个包：它们的 list 里就是上面那两条软链接，
-# 而 cp 会跟随软链接，把 19MB 实体写进链接、绕开包结构 —— 交给 v2ray 那两个
-# 实体文件去管，软链接自然跟着好。
+# 【v.180.182】v2ray-geoip / v2ray-geosite 在本表里（用户 2026-10-29 定）。
+# 【2026-11-02】改成「双保险」，不是撤出（用户追问过：删掉之后能不能自己长回来）：
+#   ① 包被 apk del 掉      → pkg-restore-apps.sh 的 _PA_GEO 判「不在册」→
+#                             从包库装回，文件和记账一起回来；
+#   ② 包还在、.dat 被删/清空 → 就是本表这一层：从 /rom 拷回。探针
+#                             （crowdsec-lxc-probe.sh 的 _kmods_watch）连续
+#                             PROBE_STALL_ROUNDS 轮缺失后自动跑 --deps --repair。
+# 两条判据都**不看版本、不看内容**，只看「在不在」：
+#   包在册 → 不重装；文件非空 → 不拷。
+# 所以用户 `apk add --upgrade v2ray-geoip` 换成新数据之后，这里一个字都不会动 ——
+# 「锁版本」这件事由 `-s` 判据本身挡住，不需要把表撤掉。（上一版曾经撤出过，
+# 结果是「文件被删没人管」，正好丢掉了用户要的「最起码有的用」。）
+# 只有真没了（whiteout / 0 字节）才拷回固件出厂那份。旧是旧了点，
+# 但比 geo 数据整个消失强：没有 geoip.dat 时分流规则会大面积走错。
+# 为什么不改成装包来修：这两个包的文件全在 /usr/share，删文件不影响 apk 记账，
+# 拷回一个文件比跑一遍包管理器轻；而且 /rom 是 squashfs 只读层，永远读得到。
+# 历史背景（daed 时代）：daed 读的是两条软链接
+#   /usr/share/daed/geoip.dat -> ../v2ray/geoip.dat
+# 所以那时真正会「没」的是 /usr/share/v2ray 下两个实体文件。
+# 现在走 honk，规则集由 native_api.geosite_download_url / geoip_download_url
+# 自己下到 data_dir（默认 /etc/honk/data），与这两个包无关。
 _DEPS_PKGS="kmod-dummy kmod-nft-socket kmod-nft-tproxy kmod-sched-bpf
 kmod-sched-core kmod-veth kmod-inet-diag kmod-tun kmod-netlink-diag
 ca-bundle libcap yq ip-full firewall4 coreutils-nohup libopenssl3
@@ -361,7 +364,24 @@ _deps_repair() {
         _dp_n=$((_dp_n + 1))
         _dp_d="${_dp_f%/*}"
         [ -d "$_dp_d" ] || mkdir -p "$_dp_d" 2>/dev/null
-        if cp -f "$ROMDIR$_dp_f" "$_dp_f" 2>/dev/null; then
+        # 【2026-11-02】基底里是软链接的，必须重建链接，不能 cp。
+        # 实测（VM 192.168.1.202，删 /usr/share/v2ray/geosite.dat 后跑 --repair）：
+        #   /rom/usr/share/xray/geosite.dat -> ../v2ray/geosite.dat   （软链接）
+        #   cp /rom/usr/share/xray/geosite.dat /usr/share/xray/geosite.dat
+        #   → 运行侧变成一个 2,324,364 字节的实体文件，链接没了。
+        # 后果不只是多占 2.3MB：以后 ../v2ray/geosite.dat 更新，xray 那份不再跟随，
+        # 两份数据就此脱钩，而且没有任何东西会报出来。这跟「拷回旧版」是两回事 ——
+        # 拷回至少还是同一份数据，脱钩之后是各走各的。
+        _dp_ln=""
+        [ -L "$ROMDIR$_dp_f" ] && _dp_ln="$(readlink "$ROMDIR$_dp_f" 2>/dev/null)"
+        if [ -n "$_dp_ln" ]; then
+            rm -f "$_dp_f" 2>/dev/null
+            if ln -s "$_dp_ln" "$_dp_f" 2>/dev/null; then
+                log "补回 $_dp_f -> $_dp_ln（软链接）"
+            else
+                log "补回失败 $_dp_f（重建软链接失败）"
+            fi
+        elif cp -f "$ROMDIR$_dp_f" "$_dp_f" 2>/dev/null; then
             log "补回 $_dp_f"
         else
             log "补回失败 $_dp_f（基底不可读或目标不可写）"

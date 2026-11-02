@@ -510,8 +510,10 @@ mkdir -p "$_AK_DIR"
 #
 # 【v.180.167】xray-core / xray-plugin 不再收（ssrp 专属，用户 2026-10-29 定不用 ssrp）。
 # 收进包库的直接后果：25.12 真机探针按旧判据把这两个装了上去（624 vs 出厂 622）。
-# v2ray-geoip / v2ray-geosite 保留：通用 geo 数据，仍然装进固件，只是不纳入探针保护
-# （理由见 pkg-restore-apps.sh 的 _PA_MOSDNS 说明）。
+# v2ray-geoip / v2ray-geosite 保留：通用 geo 数据，随 geoview 的依赖进固件，同时收进包库。
+# 【2026-11-02】探针双通道：包级（_PA_GEO，管包被 apk del）+ 文件级（--deps，管 .dat 被删）。
+# 两条判据都只看「在不在」、不看版本 —— 用户换过新数据不会被按回出厂版，
+# 真删了又能自己长回来（/usr/share/v2ray/{geoip,geosite}.dat，从 /rom 拷回）。
 #
 # 注意：下面是**双引号字符串**，注释只能写在起始引号之前。写在里面的 `#`
 # 不是注释，会被当成包名的一部分（v.180.167 踩过这个坑）。
@@ -559,7 +561,11 @@ _ak_bad_a=""
 for _f in packages/*.apk; do
     [ -f "$_f" ] || continue
     case "${_f##*/}" in
-    vmlinux-btf-*)
+    # 【2026-11-02】必须精确到 `vmlinux-btf-<数字>`。honk 的硬依赖叫
+    # vmlinux-btf-builtin-1-r1.apk，旧 glob `vmlinux-btf-*` 会把它连同
+    # vmlinux-btf-6.12.79.apk 一起吃掉 —— 结果它进不了包库，
+    # pkg-restore 的 honk 组能判出缺失、装不回来（保护变空头支票）。
+    vmlinux-btf-[0-9]*)
         _ak_skip_btf="${_f##*/}"
         continue
         ;;
@@ -592,6 +598,28 @@ fi
 if [ -n "$_ak_skip_geo" ]; then
     echo "==> [apk-cache] 已排除 run 包里的 geo 数据（统一走官方源，避免多版本被 apk 挑错）：$_ak_skip_geo"
 fi
+
+# ---- 【2026-11-02】保护组在库核对 ----
+# pkg-restore-apps.sh 的 _PA_HONK / _PA_GEO 只负责「发现缺失」；真正装回来
+# 靠的是 /rom/root/apk-cache 里这份本地包库。库里没有对应 apk 的话，
+# 探针每轮报缺失、每轮修不好 —— 那不是保护，是每轮白报一次警。
+# 所以在构建期当场核对，别把空头支票留到真机。
+if echo "$PACKAGES" | grep -q "honk"; then
+    _ak_need_honk="honk luci-app-honk luci-lib-daeuniverse luci-i18n-daeuniverse-zh-cn vmlinux-btf-builtin"
+    _ak_honk_miss=""
+    for _ak_np in $_ak_need_honk; do
+        ls "$_AK_DIR"/"$_ak_np"-[0-9]*.apk >/dev/null 2>&1 || _ak_honk_miss="$_ak_honk_miss $_ak_np"
+    done
+    if [ -n "$_ak_honk_miss" ]; then
+        echo "::error::honk 保护组缺包，探针将无法装回：$_ak_honk_miss"
+        echo "::error::来源 A 看 packages/*.apk（CloudRunFilesBuilder 的 honk-apk Release）"
+        ls -la "$_AK_DIR" 2>/dev/null | grep -i honk || true
+        exit 1
+    fi
+    echo "==> [apk-cache] honk 保护组齐备（5 包）：$_ak_need_honk"
+fi
+
+# geo 两包的核对放在来源 B 之后 —— 它们来自官方源，不是 packages/。
 
 # apk 二进制定位：只给最后「生成 packages.adb 索引」用，来源 B 已不依赖 apk。
 # 【v.180.131】apk 不一定在 PATH 里：ImageBuilder 容器是 Ubuntu 底子，
@@ -752,6 +780,20 @@ fi
 _ak_n=$(ls "$_AK_DIR"/*.apk 2>/dev/null | wc -l)
 _ak_sz=$(du -sh "$_AK_DIR" 2>/dev/null | cut -f1)
 echo "==> [apk-cache] 合计 $_ak_n 个 apk，$_ak_sz，位于 /root/apk-cache/（刷机后为只读的 /rom/root/apk-cache）"
+
+# ---- 【2026-11-02】geo 数据只按 apk 核对，不碰 .dat ----
+# 用户定：geoip / geosite 验证 apk，不验证文件 —— 因为这两份数据需要更新，
+# 按 .dat 文件判会把人的新数据按回出厂版（详见 pkg-restore-apps.sh 的 _PA_GEO）。
+# 这两个包来自官方源（来源 B），所以核对点必须在这里，不能跟 honk 组一起放前面。
+_ak_geo_miss=""
+for _ak_ng in v2ray-geoip v2ray-geosite; do
+    ls "$_AK_DIR"/"$_ak_ng"-[0-9]*.apk >/dev/null 2>&1 || _ak_geo_miss="$_ak_geo_miss $_ak_ng"
+done
+if [ -n "$_ak_geo_miss" ]; then
+    echo "::warning::geo 数据包不在库（探针判缺失时装不回）：$_ak_geo_miss"
+else
+    echo "==> [apk-cache] geo 数据包齐备（只核 apk，不核 .dat 内容）"
+fi
 
 if [ "$_ak_n" -lt 100 ]; then
     echo "::error::apk-cache 只收到 $_ak_n 个包，远低于预期（run 包约 75 + 官方白名单约 49）"

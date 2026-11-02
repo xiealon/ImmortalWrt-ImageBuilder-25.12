@@ -101,9 +101,11 @@ _RESTORE="${RESTORE_BIN:-/usr/sbin/pkg-restore.sh}"
 # 里有没有对应的 apk。两个都 yes 才留在这张表里 —— 只有前者没有后者的包，
 # 判出缺失也装不回来，每轮只是白报一次警。
 #
-# 留下的 12 个包全部 firmware=yes + pkg=yes：
+# 留下的 14 个包全部 firmware=yes + pkg=yes：
 #   clashoo / luci-app-clashoo / luci-i18n-clashoo-zh-cn
-#   honk / luci-app-honk / luci-lib-daeuniverse / vmlinux-btf-builtin
+#   honk / luci-app-honk / luci-lib-daeuniverse / luci-i18n-daeuniverse-zh-cn /
+#   vmlinux-btf-builtin
+#   v2ray-geoip / v2ray-geosite（2026-11-02 补入，只判包不判文件，见 _PA_GEO）
 #
 # vmlinux-btf-builtin 为什么也算 honk 组的一员（2026-11-02 真机核实）：
 #   它是 honk 的硬依赖，但 installed size 只有 1 B —— 唯一内容是自己的
@@ -122,7 +124,10 @@ _RESTORE="${RESTORE_BIN:-/usr/sbin/pkg-restore.sh}"
 # 形态，apk info -e 照样返回成功，包级判据根本看不见。
 # 所以交给 --deps：清单不写死，直接读 /rom/lib/apk/packages/<包>.list，
 # 从 /rom 逐文件拷回。9 个 kmod 包的 26 个 .ko 与 9 个 modules.d 配置、
-# 以及 v2ray-geoip / v2ray-geosite 的两个 .dat 都在里面（共 18 包 / 72 文件）。
+# 以及 v2ray-geoip / v2ray-geosite 的 3 条路径都在里面（共 18 包 / 73 条，
+# 2026-11-02 真机 --deps --list 实测；其中 /usr/share/xray/geosite.dat 是
+# 指向 ../v2ray/geosite.dat 的软链接，补回时按链接重建，不做 cp 实体化）。
+# geo 两个包同时也在本文件的 _PA_GEO 里（包级）—— 两条通道分工不同，见 _PA_GEO 说明。
 # 范围只有应用要用的这些：不含内核本体（坏了重刷固件），也不含 /etc/config/
 # （UCI 配置归 bootstrap 管，见 pkg-restore.sh v.180.181 说明）。
 #
@@ -137,10 +142,27 @@ _RESTORE="${RESTORE_BIN:-/usr/sbin/pkg-restore.sh}"
 #   libopenssl3        固件库有、包库无 → 装不回；且它是全系统的 TLS 底座，
 #                      不属于某一个应用的依赖
 _PA_CLASHOO="clashoo luci-app-clashoo luci-i18n-clashoo-zh-cn"
-_PA_HONK="honk luci-app-honk luci-lib-daeuniverse vmlinux-btf-builtin"
+# 【2026-11-02】用户定：需要的 apk 全保护 —— honk 组补上 i18n 包，凑满 5 个。
+# luci-i18n-daeuniverse-zh-cn 是 luci-app-honk 的依赖之一（LuCI 界面要它翻中文），
+# 少了它 honk 那页会退回英文，看上去像「能用」，实际是缺件。它同样在包库里
+# （build25.sh 的 honk 保护组断言盯着这 5 个），所以装得回来，够格进这张表。
+_PA_HONK="honk luci-app-honk luci-lib-daeuniverse luci-i18n-daeuniverse-zh-cn vmlinux-btf-builtin"
 # mosdns 组仍不含 v2ray-geoip / v2ray-geosite（v.180.166 用户定）：
 # 通用 geo 数据包上游一直在更新，按本地包库装回旧版会把人的新版本拽回老版本。
 _PA_MOSDNS="mosdns luci-app-mosdns luci-i18n-mosdns-zh-cn"
+# 【2026-11-02】geo 数据单独成组：包级判据（apk info -e），不判文件。
+#
+# 这一组负责的只是「包被人 apk del 掉」——装回时连文件带记账一起回来。
+# 「包还在、.dat 被删」是另一种故障，归 pkg-restore.sh 的 --deps 文件级通道，
+# 由探针 _kmods_watch 连续 N 轮缺失后自动从 /rom 拷回。两条合起来才叫
+# 「删了还能自己长回来」，用户 2026-11-02 明确要求要有这一层保障。
+#
+# 为什么不在这里判文件：_pa_files_ok 的 case 只认 /usr/bin /usr/sbin
+# /etc/init.d /lib/*.so*，而 geo 两包的文件全在 /usr/share/v2ray（实测
+# v2ray-geoip.list 只有 1 行 /usr/share/v2ray/geoip.dat）。所以这一组
+# 天然只判「包在册」，不会因为 .dat 新旧去动任何字节 —— 用户
+# `apk add --upgrade v2ray-geoip` 换新数据后，这里永远判在位。
+_PA_GEO="v2ray-geoip v2ray-geosite"
 # sing-box 是通用代理内核，原挂在 ssrp 组里，现在单独一组。
 # 它的 kmod 依赖（inet-diag / netlink-diag / tun）同样归 --deps 管。
 _PA_COMMON="sing-box"
@@ -151,7 +173,7 @@ _PA_COMMON="sing-box"
 #   honk 是官方 daeuniverse 源的包，预装进固件后 /rom/lib/apk/db/installed 有 P:honk，
 #   _pa_should 照常命中；被 force-remove 时同样能判出来。
 
-_PA_LIST="${CS_PROBE_APPS:-$_PA_CLASHOO $_PA_HONK $_PA_MOSDNS $_PA_COMMON}"
+_PA_LIST="${CS_PROBE_APPS:-$_PA_CLASHOO $_PA_HONK $_PA_MOSDNS $_PA_COMMON $_PA_GEO}"
 
 log() { printf '[APP] %s\n' "$*"; }
 
@@ -194,6 +216,10 @@ _pa_data_ok() {
 # 清单本身不在 → 放行（判不了，别乱报）。
 # 与 pkg-restore.sh 的 _pr_files_ok 同源。两脚本各自独立部署（探针直接 exec 本脚本），
 # 没有共享库；重复的只是 6 行 case，比引入一层 source 稳。
+#
+# case 只认程序文件（/usr/bin /usr/sbin /etc/init.d /lib/*.so*），
+# **不含 /usr/share** —— 这正是 _PA_GEO 想要的：geo 数据在 /usr/share/v2ray/*.dat，
+# 包里任何一个程序文件在册就判在位，数据新旧、在不在都不影响判断。
 _pa_files_ok() {
     _paf_l="$ROMDIR/lib/apk/packages/$1.list"
     [ -f "$_paf_l" ] || return 0
