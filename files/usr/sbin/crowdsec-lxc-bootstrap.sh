@@ -155,19 +155,13 @@ REINSTALL_MAX="${CS_BOOTSTRAP_REINSTALL_MAX:-1}"   # 连续重装失败达到即
 _CRED_REL="etc/crowdsec/online_api_credentials.yaml"
 _bs_stamped=0
 
-# 【v.108.46】IP / 网关固定，唯一来源是容器 rootfs 里的 net.conf —— 构建期由
-# rootfs-skel 写进 tarball 和固件两处（同字节），并纳入 crowdsec-guard 保护。
-# 不再读 /etc/config/custom_container_ip.txt / custom_bridge_ip.txt：那是 action
-# 输入写出来的文件，输入已取消；继续读它等于保留了一份可能过期、且没人再更新的真相。
-_net_conf="$ROOTFS/etc/crowdsec-net.conf"
-if [ -z "${CONTAINER_IP:-}" ] && [ -f "$_net_conf" ]; then
-    CONTAINER_IP="$(sed -n 's/^ADDRESS=\([0-9][0-9.]*\)\/[0-9][0-9]*$/\1/p' "$_net_conf" 2>/dev/null | head -n1)"
-fi
-CONTAINER_IP="${CONTAINER_IP:-10.1.0.10}"
-if [ -z "${BRIDGE_IP:-}" ] && [ -f "$_net_conf" ]; then
-    BRIDGE_IP="$(sed -n 's/^GATEWAY=//p' "$_net_conf" 2>/dev/null | head -n1)"
-fi
-BRIDGE_IP="${BRIDGE_IP:-10.1.0.1}"
+# 【v.108.46】容器网段固定：唯一权威是 rootfs-skel/etc/crowdsec-net.conf，
+# 构建期由它写进 tarball 与固件 /rom 两处（同字节），由 crowdsec-guard 逐字节保护。
+# 这里直接给常量，不再每轮 sed 解析 —— 解析出来的永远是这两个值；而启动早期
+# $ROOTFS 常常还没解压，解析必然落空、回落到同一个常量，等于绕一圈回到原地。
+# 容器 DNS 同样固定为网桥 IP：容器查路由器 dnsmasq，上游 DNS 由路由器自己跟。
+: "${CONTAINER_IP:=10.1.0.10}"
+: "${BRIDGE_IP:=10.1.0.1}"
 
 log() { echo "[$(date '+%F %T')] $*"; }
 
@@ -2262,7 +2256,6 @@ build_rootfs() {
 # 容器内构建子步骤判定（v.93 起由 ct_net/ct_bootlink/ct_resolv/acquis 等节点各自闭环）：
 # 每一步独立 verify 就绪探测，供所在节点的 verify/build 与整体快照判定共用，判定标准不变
 verify_sub_ct_net() {
-    _vs_dns="$(_container_dns)"
     if _is_minimal_init; then
         # 极简版：静态网络写在一份 shell 变量文件里，由 /etc/init.d/netconf 在 rcS 里套用。
         # 判据同 systemd 版一样是「三问齐全」，只是取值方式不同：
@@ -2277,7 +2270,7 @@ verify_sub_ct_net() {
     [ -f "$ROOTFS/etc/systemd/network/10-eth0.network" ] || return 1
     grep -q "Address=${CONTAINER_IP}/24" "$ROOTFS/etc/systemd/network/10-eth0.network" 2>/dev/null || return 1
     grep -q "Gateway=${BRIDGE_IP}" "$ROOTFS/etc/systemd/network/10-eth0.network" 2>/dev/null || return 1
-    grep -q "DNS=${_vs_dns}" "$ROOTFS/etc/systemd/network/10-eth0.network" 2>/dev/null || return 1
+    grep -q "DNS=${BRIDGE_IP}" "$ROOTFS/etc/systemd/network/10-eth0.network" 2>/dev/null || return 1
 }
 verify_sub_ct_bootlink() {
     if _is_minimal_init; then
@@ -2313,17 +2306,10 @@ verify_sub_ct_bootlink() {
     _vb_mid=$(tr -d ' \t\r\n' < "$ROOTFS/etc/machine-id" 2>/dev/null)
     printf '%s' "$_vb_mid" | grep -qE '^[0-9a-f]{32}$' || return 1
 }
+# 容器 resolv.conf 的期望值恒为网桥 IP：极简版是构建期静态文件（nameserver 写死），
+# systemd 版由 setup_resolv 按同一个值写。两种 init 期望一致，一条判断就够。
 verify_sub_ct_resolv() {
-    # 极简版的 resolv.conf 是构建期静态文件，nameserver 固定为网桥 IP
-    # （setup_resolv 的极简分支只确认存在，不重写）。原先拿 _container_dns()
-    # 去比 —— 那个读的是宿主上游 DNS（custom_router_dns.txt），与静态文件
-    # 不同源，永远不可能相等，于是 ct_resolv 每轮都判不符、整轮引导失败。
-    if _is_minimal_init; then
-        [ "$(cat "$ROOTFS/etc/resolv.conf" 2>/dev/null)" = "nameserver ${BRIDGE_IP}" ]
-        return
-    fi
-    _vs_dns="$(_container_dns)"
-    [ "$(cat "$ROOTFS/etc/resolv.conf" 2>/dev/null)" = "nameserver ${_vs_dns}" ]
+    [ "$(cat "$ROOTFS/etc/resolv.conf" 2>/dev/null)" = "nameserver ${BRIDGE_IP}" ]
 }
 verify_sub_cs_acquis() {
     _a="$ROOTFS/etc/crowdsec/acquis.d/router.yaml"
@@ -3599,16 +3585,6 @@ rebuild_from_image() {
 }
 
 
-_container_dns() {
-    _dns=""
-    if [ -f /etc/config/custom_router_dns.txt ]; then
-        _dns=$(tr -d '\r' < /etc/config/custom_router_dns.txt | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    fi
-    [ -n "$_dns" ] || _dns="$BRIDGE_IP"
-    [ -n "$_dns" ] || _dns='10.1.0.1'
-    printf '%s' "$_dns"
-}
-
 setup_container_network() {
     [ -d "$ROOTFS" ] || { log "[网络] rootfs 未就绪"; return 1; }
     if _is_minimal_init; then
@@ -3625,7 +3601,7 @@ setup_container_network() {
         log "[网络] 缺 /etc/crowdsec-net.conf（静态文件被删？），等 guard 从 /rom 复原"
         return 1
     fi
-    _dns="$(_container_dns)"
+    _dns="$BRIDGE_IP"
     _netfile="$ROOTFS/etc/systemd/network/10-eth0.network"
     mkdir -p "$(dirname "$_netfile")" 2>/dev/null
     atomic_write "$_netfile" "Address=${CONTAINER_IP}/24" <<EOF || { log "[网络] 容器网络文件写入不完整"; return 1; }
@@ -3702,7 +3678,7 @@ setup_resolv() {
         log "[DNS] 缺 /etc/resolv.conf（静态文件被删？），等 guard 从 /rom 复原"
         return 1
     fi
-    _dns="$(_container_dns)"
+    _dns="$BRIDGE_IP"
     echo "nameserver ${_dns}" | atomic_write "$_resolv" "nameserver" \
         || { log "[DNS] resolv.conf 写入不完整"; return 1; }
     chmod 644 "$_resolv" 2>/dev/null
