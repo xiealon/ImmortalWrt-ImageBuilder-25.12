@@ -2271,7 +2271,7 @@ verify_sub_ct_net() {
         [ -f "$_vs_net" ] || return 1
         grep -qx "ADDRESS=${CONTAINER_IP}/24" "$_vs_net" 2>/dev/null || return 1
         grep -qx "GATEWAY=${BRIDGE_IP}" "$_vs_net" 2>/dev/null || return 1
-        grep -qx "DNS=${_vs_dns}" "$_vs_net" 2>/dev/null || return 1
+        grep -qx "DNS=${BRIDGE_IP}" "$_vs_net" 2>/dev/null || return 1
         return 0
     fi
     [ -f "$ROOTFS/etc/systemd/network/10-eth0.network" ] || return 1
@@ -2314,6 +2314,14 @@ verify_sub_ct_bootlink() {
     printf '%s' "$_vb_mid" | grep -qE '^[0-9a-f]{32}$' || return 1
 }
 verify_sub_ct_resolv() {
+    # 极简版的 resolv.conf 是构建期静态文件，nameserver 固定为网桥 IP
+    # （setup_resolv 的极简分支只确认存在，不重写）。原先拿 _container_dns()
+    # 去比 —— 那个读的是宿主上游 DNS（custom_router_dns.txt），与静态文件
+    # 不同源，永远不可能相等，于是 ct_resolv 每轮都判不符、整轮引导失败。
+    if _is_minimal_init; then
+        [ "$(cat "$ROOTFS/etc/resolv.conf" 2>/dev/null)" = "nameserver ${BRIDGE_IP}" ]
+        return
+    fi
     _vs_dns="$(_container_dns)"
     [ "$(cat "$ROOTFS/etc/resolv.conf" 2>/dev/null)" = "nameserver ${_vs_dns}" ]
 }
