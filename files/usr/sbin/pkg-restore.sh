@@ -322,8 +322,9 @@ _DEPS_ROM_LIST="$ROMDIR/lib/apk/packages"
 # 历史背景（daed 时代）：daed 读的是两条软链接
 #   /usr/share/daed/geoip.dat -> ../v2ray/geoip.dat
 # 所以那时真正会「没」的是 /usr/share/v2ray 下两个实体文件。
-# 现在走 honk，规则集由 native_api.geosite_download_url / geoip_download_url
-# 自己下到 data_dir（默认 /etc/honk/data），与这两个包无关。
+# 【2026-11-03】25.12 线改回 daed 后，这两条软链接重新生效：daed 本身不做
+# data_dir 自下载，规则集完全依赖 /usr/share/v2ray 下的这两个实体文件，
+# 所以「没」的就是它们，拷回才真的有用。
 _DEPS_PKGS="kmod-dummy kmod-nft-socket kmod-nft-tproxy kmod-sched-bpf
 kmod-sched-core kmod-veth kmod-inet-diag kmod-tun kmod-netlink-diag
 ca-bundle libcap yq ip-full firewall4 coreutils-nohup libopenssl3

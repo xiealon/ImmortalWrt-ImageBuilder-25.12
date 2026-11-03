@@ -11,14 +11,15 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-rtp2httpd luci-i18n-rtp2httpd-zh-cn"
 #   穿透   → tailscale + cloudflared + nps（留这三个，见下方 zerotier/xfrpc/eoip/ngrokc 各处说明）
 # 当日 201 实测：/etc/lucky 目录 0 个文件、option enabled '0' —— 装了从未配置，
 # 留着只是多一个从没验证过的黑盒。cp /etc/config/lucky 里 configdir 指向它。
-# honk：25.12 上替代 daed 的 eBPF 代理引擎（硬要求内核 6.12+）。
-# doona 管理界面内嵌在 honk-core 里，访问 http://<LAN IP>:9527/（必须用 IP，不认主机名）。
-# luci-app-honk 只负责 Services → honk 的启停/升级，节点与路由仍在 doona 里配。
-# 包来自 xiealon/CloudRunFilesBuilder 的 honk-apk Release，由 build25.sh 下到 packages/，
-# 所以这里不带 @tag —— 走的是本地包，不是 apk 源。
-# luci-lib-daeuniverse 是 luci-app-honk 的运行依赖；vmlinux-btf-builtin 是 BTF 哨兵，
-# 显式列出是为了让「缺包」在构建期就暴露，而不是靠依赖解析碰运气。
-CUSTOM_PACKAGES="$CUSTOM_PACKAGES honk luci-app-honk luci-lib-daeuniverse luci-i18n-daeuniverse-zh-cn vmlinux-btf-builtin"
+# 【2026-11-03】25.12 线改回 daed（用户定：honk 还停在 beta，不如 daed 好用）。
+# daed 五件套全部来自 25.12.2 官方源，逐个列出，不靠依赖解析碰运气：
+#   引擎  daed-1.27.0               packages/  eBPF 代理本体
+#   数据  daed-geoip / daed-geosite packages/  .dat 由它们提供（运行时是软链接）
+#   控件  luci-app-daed             luci/      Services → daed
+#   中文  luci-i18n-daed-zh-cn      luci/      少了它界面退回英文，看似能用实为缺件
+# 这 5 个必须与 build25.sh 的 _AK_WANT、pkg-restore-apps.sh 的 _PA_DAED 三处一致，
+# 否则「装上了但包库里没有」或「探针判缺失却修不动」，两头都是空头支票。
+CUSTOM_PACKAGES="$CUSTOM_PACKAGES daed luci-app-daed luci-i18n-daed-zh-cn daed-geoip daed-geosite"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES geoview sing-box luci-compat kmod-tun kmod-inet-diag kmod-nft-tproxy kmod-nft-socket bash curl lua unzip"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES clashoo luci-app-clashoo luci-i18n-clashoo-zh-cn"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES yq kmod-dummy ca-bundle"

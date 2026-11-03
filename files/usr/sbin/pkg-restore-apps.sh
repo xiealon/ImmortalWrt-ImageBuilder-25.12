@@ -3,7 +3,7 @@
 #
 # 为什么有这支脚本（用户 2026-10-29 定，判据取向见 crowdsec-lxc-probe.sh L219-231）：
 #   探针只做两件事 —— 探测 + 拉脚本，自己不动手装包。
-#   honk / clashoo 这两个应用不像 smartdns 那样接管 53
+#   daed / clashoo 这两个应用不像 smartdns 那样接管 53
 #   （ssrp 已于 v.180.165 整组移除，理由见清单处的说明），
 #   所以不判进程、不判端口，只判包在不在册；缺了由本脚本装回。
 #   【v.180.164】判定粒度从「主程序一个包」扩到「主程序 + 依赖内核 + LuCI 界面」：
@@ -20,9 +20,8 @@
 #                                   0 = 全部在位；1 = 仍有缺（或装不上）
 #
 # 判据主体是包管理器认不认。本版写死 apk（25.12 线只有 apk）：apk info -e。
-# 【2026-11-02】原 daed-geoip / daed-geosite 的软链接例外随 daed 一并移除
-# （25.12 线改用 honk）；honk 的规则集由 native_api 自己下载到 data_dir，
-# 不依赖 /usr/share 下的软链接，包在册即视为数据齐备。
+# 【2026-11-03】daed-geoip / daed-geosite 的运行数据是软链接，包在册不等于数据在，
+# 所以对这两个包另加一条「链接可读」判据（见 _pa_data_ok）。
 #   【v.180.192】补齐文件级判据（用户 2026-10-30 定）。原来这里写的是「不看文件清单」，
 #   理由是清单随版本漂 / 文件缺失 ≠ 功能缺失 / 两判据混用会死循环。这三条在
 #   「包完整在册、二进制被单独删掉」这种形态上都不成立：
@@ -38,14 +37,14 @@
 #   把包内二进制单独删掉后，--check 仍返回 0、探针 appbad 恒为 0。
 #   覆盖范围（各包落在判据内的文件）：
 #     clashoo           /usr/bin/mihomo /usr/bin/clash-meta /etc/init.d/clashoo
-#     honk              /usr/bin/honk-core /etc/init.d/honk
+#     daed              /usr/bin/daed /etc/init.d/daed
 #     sing-box          /usr/bin/sing-box /etc/init.d/sing-box
 #   25.12 的清单格式相同（一行一个绝对路径），但未在 25.12 新机上逐包复测路径覆盖率。
 #   LuCI 壳与 i18n（6 个包）的文件都在 /usr/share、/usr/lib/lua，判据内 0 行 → 恒放行，
 #   仍只靠记账判。这是有意的：那类文件删了顶多界面缺项，不会像二进制那样静默失去功能。
 #
 # 【关键】「该不该有」的门槛：只恢复固件里本来就带的那个应用。
-#   否则一台根本没装 honk 的机器，探针每轮都判「缺」、每轮装一次，装上了再被
+#   否则一台根本没装 daed 的机器，探针每轮都判「缺」、每轮装一次，装上了再被
 #   用户卸掉，又装 —— 就不是修复是强加。判据取 /rom 侧留下的痕迹（apk 域）：
 #     · /rom/lib/apk/db/installed —— 固件出厂的已安装库，P:<包名> 一行一个
 #   不准拿 /rom/root/apk-cache/<包>-*.apk 当判据：那是兜底包库，收的包远多于
@@ -74,11 +73,11 @@ _RESTORE="${RESTORE_BIN:-/usr/sbin/pkg-restore.sh}"
 #   ③ LuCI 界面（luci-app-* / luci-i18n-*）—— 少了用户看不见入口，等同于坏了
 #
 #   clashoo 组：内核就在主包里（control: Provides: mihomo, clash-meta，Installed-Size 46.5MB）
-#   honk 组：  eBPF 程序，vmlinux-btf 是运行时前提，缺了 honk-core 直接起不来
+#   daed 组：  eBPF 程序，vmlinux-btf 是运行时前提，缺了 daed 直接起不来
 #   ssrp 组：已整组移除，见下方 v.180.165 说明
 #
 # 【v.180.165】ssrp 组整组删除（用户 2026-10-29 定）。理由两条：
-#   ① honk 已经能替代它，没有必要再维护一套 ssr-plus；
+#   ① daed 已经能替代它，没有必要再维护一套 ssr-plus；
 #   ② ssr-plus 的依赖链太长 —— xray-core / xray-plugin / v2ray-plugin /
 #      三套 shadowsocksr-libev / trojan-plus / tuic / shadow-tls / naiveproxy /
 #      simple-obfs-client，每轮 _pa_missing 都要逐包问一次包管理器，
@@ -100,22 +99,17 @@ _RESTORE="${RESTORE_BIN:-/usr/sbin/pkg-restore.sh}"
 #
 # 留下的 14 个包全部 firmware=yes + pkg=yes：
 #   clashoo / luci-app-clashoo / luci-i18n-clashoo-zh-cn
-#   honk / luci-app-honk / luci-lib-daeuniverse / luci-i18n-daeuniverse-zh-cn /
-#   vmlinux-btf-builtin
+#   daed / daed-geoip / daed-geosite / luci-app-daed / luci-i18n-daed-zh-cn
 #   sing-box
 #   v2ray-geoip / v2ray-geosite（2026-11-02 补入，只判包不判文件，见 _PA_GEO）
 #   adblock / luci-app-adblock / luci-i18n-adblock-zh-cn（2026-11-02 补入，见 _PA_ADBLOCK；
 #     这三包 pkg=yes 的前提是把它们收进 build25.sh 的 _AK_WANT —— 当日实测包库
 #     116 个 apk 里 adblock 相关 0 个，光加保护组修不动，已一并收进白名单）
 #
-# vmlinux-btf-builtin 为什么也算 honk 组的一员（2026-11-02 真机核实）：
-#   它是 honk 的硬依赖，但 installed size 只有 1 B —— 唯一内容是自己的
-#   lib/apk/packages/vmlinux-btf-builtin.list。apk 的 Depends 里写死了它，
-#   删掉之后 honk 的依赖链就断，apk 任何一次操作都可能顺手把 honk 也带走。
-#   它同时是个哨兵：pre-install 会检查 /sys/kernel/btf/vmlinux，内核没自带
-#   BTF 的机器装不上它 —— 反过来说，它在册就等于「这台机器的内核 BTF 是好的」。
-#   恢复走 _pr_tree 从 /rom 拷文件，不需要 apk 源，所以保护是真的生效。
-#   sing-box
+# 【2026-11-03】vmlinux-btf-builtin 已随 honk 一并移出（25.12 改回 daed）。
+#   daed 的 eBPF 同样需要内核 BTF，但 25.12 内核已自带（CONFIG_DEBUG_INFO_BTF=y，
+#   /sys/kernel/btf/vmlinux 由内核提供），官方源里一个 btf 包都没有 —— 
+#   不需要再放一份占位包，见 build25.sh 的 _ak_skip_btf。
 #
 # 内核模块全部移出本表，改由 pkg-restore.sh --deps 做文件级恢复。
 # 原因是决定性的（2026-10-29 实测）：kmod-* 在固件出厂库里（P:kmod-tun 命中），
@@ -142,11 +136,12 @@ _RESTORE="${RESTORE_BIN:-/usr/sbin/pkg-restore.sh}"
 #   libopenssl3        固件库有、包库无 → 装不回；且它是全系统的 TLS 底座，
 #                      不属于某一个应用的依赖
 _PA_CLASHOO="clashoo luci-app-clashoo luci-i18n-clashoo-zh-cn"
-# 【2026-11-02】用户定：需要的 apk 全保护 —— honk 组补上 i18n 包，凑满 5 个。
-# luci-i18n-daeuniverse-zh-cn 是 luci-app-honk 的依赖之一（LuCI 界面要它翻中文），
-# 少了它 honk 那页会退回英文，看上去像「能用」，实际是缺件。它同样在包库里
-# （build25.sh 的 honk 保护组断言盯着这 5 个），所以装得回来，够格进这张表。
-_PA_HONK="honk luci-app-honk luci-lib-daeuniverse luci-i18n-daeuniverse-zh-cn vmlinux-btf-builtin"
+# 【2026-11-03】25.12 线改回 daed，整链 5 包一起护：
+#   daed / daed-geoip / daed-geosite / luci-app-daed / luci-i18n-daed-zh-cn
+# 只写 i18n 一条也能靠依赖链把本体拉进来，但显式列全是为了 apk del 掉其中
+# 任意一个都能被单独判出来。这 5 个与 build25.sh 的 _AK_WANT、
+# apk-custom-packages.sh 的 CUSTOM_PACKAGES 必须一致。
+_PA_DAED="daed daed-geoip daed-geosite luci-app-daed luci-i18n-daed-zh-cn"
 # 【2026-11-02】geo 数据单独成组：包级判据（apk info -e），不判文件。
 #
 # 这一组负责的只是「包被人 apk del 掉」——装回时连文件带记账一起回来。
@@ -180,13 +175,15 @@ _PA_COMMON="sing-box"
 # 用户规则被删，宁可让他知道缺了，也不要悄悄换成一份空白的出厂白名单。
 _PA_ADBLOCK="adblock luci-app-adblock luci-i18n-adblock-zh-cn"
 
-# 【2026-11-02】daed 在 25.12 线已被 honk 取代（用户定），原来的 geo 软链接判据一并删除：
-#   honk 的规则集不走 /usr/share/daed/*.dat 软链接，而是按 native_api.geosite_download_url /
-#   geoip_download_url 自己下到 data_dir（默认 /etc/honk/data），包在册即认定数据齐备。
-#   honk 是官方 daeuniverse 源的包，预装进固件后 /rom/lib/apk/db/installed 有 P:honk，
-#   _pa_should 照常命中；被 force-remove 时同样能判出来。
+# 【2026-11-03】daed 的 geo 数据是软链接，真实文件由 v2ray-geoip / v2ray-geosite 提供：
+#   /usr/share/daed/geoip.dat    -> ../v2ray/geoip.dat
+#   /usr/share/daed/geosite.dat  -> ../v2ray/geosite.dat
+# 包在册但链接断了同样算「缺失」—— 包级判据（_PA_GEO）看不到这种状态，
+# 所以对这两个包再加一条「链接可读」判据，见 _pa_data_ok。
+_PA_LINK_DAED_GEOIP=/usr/share/daed/geoip.dat
+_PA_LINK_DAED_GEOSITE=/usr/share/daed/geosite.dat
 
-_PA_LIST="${CS_PROBE_APPS:-$_PA_CLASHOO $_PA_HONK $_PA_COMMON $_PA_GEO $_PA_ADBLOCK}"
+_PA_LIST="${CS_PROBE_APPS:-$_PA_CLASHOO $_PA_DAED $_PA_COMMON $_PA_GEO $_PA_ADBLOCK}"
 
 log() { printf '[APP] %s\n' "$*"; }
 
@@ -213,11 +210,13 @@ _pa_should() {
 }
 
 # 已装包的「运行数据还在吗」补充判据（v.180.167）。
-# 原来只对 daed 的两个 geo 包生效（软链接断链要算缺失）。
-# 【2026-11-02】daed 在 25.12 线被 honk 取代，本线已无「包在、数据另存」的包，
-# case 里不再有任何具体分支；函数保留是为了调用点不用改，也方便日后加新判据。
+# 只对 daed 的两个 geo 包生效：它们的运行数据是软链接，包在册不代表数据在。
+# 其余包没有「包在、数据另存」的结构，直接算好。
+# 【2026-11-03】25.12 线改回 daed，两条判据一并恢复。
 _pa_data_ok() {
     case "$1" in
+    daed-geoip)   [ -r "$_PA_LINK_DAED_GEOIP" ] ;;
+    daed-geosite) [ -r "$_PA_LINK_DAED_GEOSITE" ] ;;
     *)            return 0 ;;
     esac
 }

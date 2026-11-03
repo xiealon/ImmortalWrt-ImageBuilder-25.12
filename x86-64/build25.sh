@@ -248,50 +248,14 @@ _gh_fixname() {
     return 1
 }
 
-# honk：apk 改从自家的 CloudRunFilesBuilder Release 取，不再挂 daeuniverse 第三方源。
-# 为什么换：openwrt.daeuniverse.org 是上游 beta 期临时源，包随时可能被撤；
-# 而 honk-apk Release 是同一套 apk 的镜像，版本由 CloudRunFilesBuilder 定时跟踪。
-# 落点与 OpenClash 一致（packages/），make image 会把它当本地包装进固件。
-# 依赖一并取：luci-app-honk 要 luci-lib-daeuniverse；vmlinux-btf-builtin 是 BTF 哨兵，
-# 装前检查 /sys/kernel/btf/vmlinux，缺了 honk-core 起不来。
-if echo "$PACKAGES" | grep -q "honk"; then
-    _hk_api="https://api.github.com/repos/xiealon/CloudRunFilesBuilder/releases/tags/honk-apk"
-    echo "==> honk: 读取 Release 资产清单"
-    echo "    $_hk_api"
-    _hk_json=$(wget -qO- --timeout=30 --tries=3 "$_hk_api" 2>/dev/null) || _hk_json=""
-    if [ -z "$_hk_json" ]; then
-        echo "::error::honk: 取不到 honk-apk Release 资产清单（网络不通或 Release 不存在）"
-        exit 1
-    fi
-    _hk_n=0
-    for _hk_pkg in honk luci-app-honk luci-lib-daeuniverse luci-i18n-daeuniverse-zh-cn vmlinux-btf-builtin; do
-        _hk_url=$(printf '%s' "$_hk_json" \
-            | grep -oE "\"https://[^\"]*/${_hk_pkg}-[0-9][^\"]*\.apk\"" \
-            | tr -d '"' | head -n1)
-        if [ -z "$_hk_url" ]; then
-            echo "::error::honk: Release 里没有 ${_hk_pkg}-*.apk"
-            exit 1
-        fi
-        echo "    ↓ $(basename "$_hk_url")"
-        wget -q "$_hk_url" -P /home/build/immortalwrt/packages/ \
-            || { echo "::error::honk: 下载失败 $_hk_url"; exit 1; }
-        # GitHub 把资产名里的 ~ 换成 .，包内 pkgver 仍是 ~ —— 必须改回来，
-        # 否则 make image 的 package_install 找不到文件（run #18 就是这么挂的）
-        _gh_fixname "/home/build/immortalwrt/packages/$(basename "$_hk_url")" || exit 1
-        _hk_n=$((_hk_n + 1))
-    done
-    echo "✅ honk: $_hk_n 个 apk 已进 packages/（版本随 Release 走）"
-    ls -l /home/build/immortalwrt/packages/honk-*.apk \
-          /home/build/immortalwrt/packages/luci-app-honk-*.apk \
-          /home/build/immortalwrt/packages/luci-lib-daeuniverse-*.apk \
-          /home/build/immortalwrt/packages/luci-i18n-daeuniverse-zh-cn-*.apk \
-          /home/build/immortalwrt/packages/vmlinux-btf-builtin-*.apk 2>/dev/null || true
-else
-    echo "⚪️ 未选择 honk"
-fi
+# 【2026-11-03】25.12 线改回 daed（用户定）。
+# daed 五件套全部来自 25.12.2 官方源，不需要预下载：CUSTOM_PACKAGES 点名后
+# make image 自己从 repositories.conf 取，包库那部分由下面「来源 B」统一收。
+# （原来这里是从 CloudRunFilesBuilder 的 honk-apk Release 下载 honk 五包的，
+#   honk 已整条移除，连带 vmlinux-btf-builtin 占位包一并不再需要。）
 
 # OpenClash 的 apk 也是直接从 GitHub Release 下的，资产名同样会被 GitHub 把 ~
-# 换成 .（本次没选 openclash，未实测，但风险与 honk 同源）。
+# 换成 .（本次没选 openclash，未实测，但风险与 GitHub Release 资产同源）。
 # _gh_fixname 定义在上面，这里补一刀；没选时通配符不匹配，循环空转。
 for _oc_f in packages/luci-app-openclash-*.apk; do
     [ -f "$_oc_f" ] || continue
@@ -591,6 +555,7 @@ lxc-unshare lxc-usernsexec lxc-wait liblxc rpcd-mod-lxc
 luci-app-lxc luci-i18n-lxc-zh-cn
 smartdns luci-app-smartdns
 mosdns
+daed daed-geoip daed-geosite luci-app-daed luci-i18n-daed-zh-cn
 crowdsec-firewall-bouncer luci-app-crowdsec-firewall-bouncer
 luci-i18n-crowdsec-firewall-bouncer-zh-cn nftables-json
 v2ray-geoip v2ray-geosite sing-box
@@ -628,10 +593,9 @@ _ak_bad_a=""
 for _f in packages/*.apk; do
     [ -f "$_f" ] || continue
     case "${_f##*/}" in
-    # 【2026-11-02】必须精确到 `vmlinux-btf-<数字>`。honk 的硬依赖叫
-    # vmlinux-btf-builtin-1-r1.apk，旧 glob `vmlinux-btf-*` 会把它连同
-    # vmlinux-btf-6.12.79.apk 一起吃掉 —— 结果它进不了包库，
-    # pkg-restore 的 honk 组能判出缺失、装不回来（保护变空头支票）。
+    # 【2026-11-03】只排除带数字版本的 btf 包（vmlinux-btf-6.12.79 这类
+    # 从第三方 run 包里带出来的，与目标内核版本对不上）。25.12 内核自带 BTF，
+    # 官方源里一个 btf 包都没有，本就不该再往包库里放一份。
     vmlinux-btf-[0-9]*)
         _ak_skip_btf="${_f##*/}"
         continue
@@ -666,27 +630,7 @@ if [ -n "$_ak_skip_geo" ]; then
     echo "==> [apk-cache] 已排除 run 包里的 geo 数据（统一走官方源，避免多版本被 apk 挑错）：$_ak_skip_geo"
 fi
 
-# ---- 【2026-11-02】保护组在库核对 ----
-# pkg-restore-apps.sh 的 _PA_HONK / _PA_GEO 只负责「发现缺失」；真正装回来
-# 靠的是 /rom/root/apk-cache 里这份本地包库。库里没有对应 apk 的话，
-# 探针每轮报缺失、每轮修不好 —— 那不是保护，是每轮白报一次警。
-# 所以在构建期当场核对，别把空头支票留到真机。
-if echo "$PACKAGES" | grep -q "honk"; then
-    _ak_need_honk="honk luci-app-honk luci-lib-daeuniverse luci-i18n-daeuniverse-zh-cn vmlinux-btf-builtin"
-    _ak_honk_miss=""
-    for _ak_np in $_ak_need_honk; do
-        ls "$_AK_DIR"/"$_ak_np"-[0-9]*.apk >/dev/null 2>&1 || _ak_honk_miss="$_ak_honk_miss $_ak_np"
-    done
-    if [ -n "$_ak_honk_miss" ]; then
-        echo "::error::honk 保护组缺包，探针将无法装回：$_ak_honk_miss"
-        echo "::error::来源 A 看 packages/*.apk（CloudRunFilesBuilder 的 honk-apk Release）"
-        ls -la "$_AK_DIR" 2>/dev/null | grep -i honk || true
-        exit 1
-    fi
-    echo "==> [apk-cache] honk 保护组齐备（5 包）：$_ak_need_honk"
-fi
-
-# geo 两包的核对放在来源 B 之后 —— 它们来自官方源，不是 packages/。
+# daed 保护组与 geo 包的核对统一放在来源 B 之后 —— 它们都来自官方源，不是 packages/。
 
 # apk 二进制定位：只给最后「生成 packages.adb 索引」用，来源 B 已不依赖 apk。
 # 【v.180.131】apk 不一定在 PATH 里：ImageBuilder 容器是 Ubuntu 底子，
@@ -851,7 +795,7 @@ echo "==> [apk-cache] 合计 $_ak_n 个 apk，$_ak_sz，位于 /root/apk-cache/�
 # ---- 【2026-11-02】geo 数据只按 apk 核对，不碰 .dat ----
 # 用户定：geoip / geosite 验证 apk，不验证文件 —— 因为这两份数据需要更新，
 # 按 .dat 文件判会把人的新数据按回出厂版（详见 pkg-restore-apps.sh 的 _PA_GEO）。
-# 这两个包来自官方源（来源 B），所以核对点必须在这里，不能跟 honk 组一起放前面。
+# 这两组都来自官方源（来源 B），所以核对点必须在这里，不能跟来源 A 放前面。
 _ak_geo_miss=""
 for _ak_ng in v2ray-geoip v2ray-geosite; do
     ls "$_AK_DIR"/"$_ak_ng"-[0-9]*.apk >/dev/null 2>&1 || _ak_geo_miss="$_ak_geo_miss $_ak_ng"
@@ -861,6 +805,24 @@ if [ -n "$_ak_geo_miss" ]; then
 else
     echo "==> [apk-cache] geo 数据包齐备（只核 apk，不核 .dat 内容）"
 fi
+
+# ---- 【2026-11-03】daed 保护组在库核对 ----
+# pkg-restore-apps.sh 的 _PA_DAED 只负责「发现缺失」；真正装回来靠的是
+# /rom/root/apk-cache 里这份本地包库。库里没有对应 apk 的话，探针每轮报缺失、
+# 每轮修不好 —— 那不是保护，是每轮白报一次警。所以构建期当场核对。
+# 核对点必须在这里（来源 B 之后）：5 个包全部来自官方源，
+# daed/daed-geoip/daed-geosite 在 packages feed，luci-app-daed 与 i18n 在 luci feed。
+_ak_need_daed="daed daed-geoip daed-geosite luci-app-daed luci-i18n-daed-zh-cn"
+_ak_daed_miss=""
+for _ak_nd in $_ak_need_daed; do
+    ls "$_AK_DIR"/"$_ak_nd"-[0-9]*.apk >/dev/null 2>&1 || _ak_daed_miss="$_ak_daed_miss $_ak_nd"
+done
+if [ -n "$_ak_daed_miss" ]; then
+    echo "::error::daed 保护组缺包，探针将无法装回：$_ak_daed_miss"
+    echo "::error::这 5 个都来自官方源，先看上面来源 B 的 missing 列表"
+    exit 1
+fi
+echo "==> [apk-cache] daed 保护组齐备（5 包）：$_ak_need_daed"
 
 if [ "$_ak_n" -lt 100 ]; then
     echo "::error::apk-cache 只收到 $_ak_n 个包，远低于预期（run 包约 75 + 官方白名单约 49）"
