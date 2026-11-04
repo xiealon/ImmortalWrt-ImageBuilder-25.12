@@ -1715,7 +1715,7 @@ v.108.38 刚把 ISO 修好，随后判断这东西对本项目**没有实际用�
 合计释放约 **2.2 GB**。保留：Release `Autobuild-x86-64`（rootfs.tar.gz + 两版
 img.gz，共三件）与三个工作流（24.10 构建、25.12 构建、清理旧 run）。
 
-顺手记两条边界：`wukongdaily.md` 里的 ISO 教程属上游原文，不动；
+顺手记两条边界：`wukongdaily.md` 属上游原文存档（2026-11-05 起正文移出，仅留出处声明与原文链接）；
 `x86-64/imm.config` 的 `CONFIG_ISO_IMAGES=n` 是 OpenWrt 自己的编译开关，与流水线无关。
 
 核对：远端 workflow 列表实测 3 个，`master=3c9d83d`，artifact total=0。
