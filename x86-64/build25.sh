@@ -277,6 +277,22 @@ if [ -d /home/build/immortalwrt/shell/apk-keys ]; then
     cp -v /home/build/immortalwrt/shell/apk-keys/*.pub /home/build/immortalwrt/keys/ 2>/dev/null
     cp -v /home/build/immortalwrt/shell/apk-keys/*.rsa.pub /home/build/immortalwrt/keys/ 2>/dev/null
 fi
+
+# 【2026-11-05】run 包验签公钥是硬依赖，缺了当场失败，不许静默跳过：
+#   构建侧 —— IB 的 keys/ 没它，apk index / make image 装包全报 UNTRUSTED；
+#   固件侧 —— /etc/apk/keys/ 没它，刷机后 apk add run 包要带 --allow-untrusted。
+# 公钥本体在 shell/apk-keys/daeuniverse.pub，另 overlay 一份到 files/etc/apk/keys/。
+_AK_KEY="daeuniverse.pub"
+for _ak_dir in \
+    "/home/build/immortalwrt/shell/apk-keys" \
+    "/home/build/immortalwrt/keys" \
+    "/home/build/immortalwrt/files/etc/apk/keys"; do
+    if [ ! -s "$_ak_dir/$_AK_KEY" ]; then
+        echo "::error::$_ak_dir/$_AK_KEY 缺失或 0 字节 —— run 包将全部 UNTRUSTED，中止"
+        exit 1
+    fi
+done
+echo "==> [apk-key] $_AK_KEY 三处就位：shell/apk-keys/ keys/ files/etc/apk/keys/"
 case " $PACKAGES " in
     *" luci-i18n-aria2"*)
         mkdir -p files/aria2
