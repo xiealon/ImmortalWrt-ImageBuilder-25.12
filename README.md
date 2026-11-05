@@ -1,10 +1,6 @@
 # IP网关DNS为固定，请提前规划。
 
-![这是什么 · 九组链式置位](docs/bp-nine-group-flow.png)
-
 # 整体流程
-
-![整体流程](docs/repo-flow.png)
 
 这个仓库分两段：**编译期**在 GitHub Actions 上把固件编出来，**运行期**固件开机后自己把 CrowdSec 容器拉起来。两段之间唯一的交接物是 `img.gz`。
 
@@ -109,8 +105,6 @@ uci 配置。bootstrap 的 `_drop_enroll_key` 在绑定成功后会删 enroll ke
 ---
 
 ## LAPI 组细部：取 LAPI → 填入 bouncer → 重启宿主机服务
-
-![LAPI 组细部](docs/lapi-group-flow.png)
 
 填完 `api_key` 之后**必须重启宿主机 bouncer**（`service crowdsec-firewall-bouncer restart`），
 否则进程仍持着旧 key，紧接着的 `BOUNCERVERIFY` 会白等 60 秒再判 hard。
@@ -2773,10 +2767,6 @@ workflow 的 `docker run` 是**白名单挂载**，只挂了这几条：
 两条线统一为 `192.168.1.201`，网关 `192.168.1.1`。这是 workflow 手动触发时的
 **输入默认值**，不是固件里写死的地址 —— 每次构建仍可临时改。
 
-
-# crowdsec 引导流程图
-
-![CrowdSec LXC 引导流程图](docs/crowdsec-flow.png)
 
 # 最后，感谢每一位项目贡献者。
 
