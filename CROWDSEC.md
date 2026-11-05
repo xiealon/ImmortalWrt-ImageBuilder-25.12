@@ -2,7 +2,7 @@
 
 编译期在 GitHub Actions 把固件编出来，运行期固件开机后自己把 CrowdSec 容器拉起来，两段之间唯一的交接物是 `img.gz`。
 
-24.10 与 25.12-honk 两条线的这部分逻辑完全相同，代码分别在各仓库的 `x86-64/build24.sh` / `x86-64/build25.sh` 与 `rootfs-skel/`、`shell/` 里。
+三条线（25.12 / 24.10 / 25.12-honk）的这部分逻辑完全相同，代码分别在各自的 `x86-64/build24.sh` / `x86-64/build25.sh` 与 `rootfs-skel/`、`shell/` 里。
 
 v.103 起的改动记录见 [CHANGELOG.md](CHANGELOG.md)，仓库导航见 [README.md](README.md)。
 
