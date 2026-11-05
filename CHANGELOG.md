@@ -1,8 +1,8 @@
 # 版本日志
 
-ImmortalWrt-ImageBuilder-25.12 从 **v.103** 起的改动记录，每条含原因、复现证据与验收点。
+三条线（25.12 / 24.10 / 25.12-honk）共用的改动记录，从 **v.103** 起，每条含原因、复现证据与验收点。
 
-主文档（整体流程、CrowdSec 运行期、网络与防火墙校验、测试怎么跑）见 [README.md](README.md)。
+主文档（整体流程、CrowdSec 运行期、网络与防火墙校验、测试怎么跑）见 [CROWDSEC.md](CROWDSEC.md)；仓库导航见 [README.md](README.md)。
 
 按时间先后排列，从早到晚。
 
