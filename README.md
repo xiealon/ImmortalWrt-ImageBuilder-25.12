@@ -20,7 +20,7 @@ ImmortalWrt **25.12.x** x86-64 固件构建线，**CrowdSec LXC 的完整说明�
 | honk 组 apk | 无 | 无 | **5 个，构建时从 `honk-apk` Release 取** |
 | `sha256/` 目录 | 无 | 无 | **有** |
 | CrowdSec LXC / rootfs-skel / 网络校验 | 有 | 有 | 有 |
-| 版本日志 | README 2,773 行 | 不重复，见 25.12 | 不重复，见 25.12 |
+| 版本日志 | README 572 行 + CHANGELOG 2,259 行 | 不重复，见 25.12 | 不重复，见 25.12 |
 
 **本仓库就是那份完整说明**：CrowdSec LXC 的整套运行期逻辑、网络与防火墙的逐条校验、`rootfs-skel` 契约，都在下面。
 
@@ -556,7 +556,7 @@ python3 tests/static_verify_first.py # 逐节点核查「先验证后写入」
 
 v.103 起的每一条改动（原因、复现证据、验收点）单独放在一个文件里，不再挤在本文中：
 
-**[CHANGELOG.md](CHANGELOG.md)** — 122176 B / 2,259 行，从 v.103 一直到 v.180.121。
+**[CHANGELOG.md](CHANGELOG.md)** — 122,176 B / 2,259 行，从 v.103 一直到 v.180.121。
 
 第三方插件清单见 [PACKAGES.md](PACKAGES.md)，支持的机型见 [SUPPORT.md](SUPPORT.md)。
 
