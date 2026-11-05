@@ -1,3 +1,31 @@
+# ImmortalWrt-ImageBuilder-25.12
+
+ImmortalWrt **25.12.x** x86-64 固件构建线，**CrowdSec LXC 的完整说明就在本仓库**。
+
+## 三条线的差异
+
+| | 25.12 | 24.10 | 25.12-honk |
+|---|---|---|---|
+| 用途 | **主线** | 老版本线，维护用 | **跑 honk** |
+| workflow | 27,449 B / 485 行 | 27,853 B / 494 行 | **37,419 B / 641 行** |
+| `runs-on` | ubuntu-22.04 | ubuntu-22.04 | **ubuntu-24.04** |
+| ImageBuilder | 官方 docker，tag 跟下拉（25.12.0 / 25.12.1） | 官方 docker，tag 跟下拉（24.10.0 ~ 24.10.6） | **自建 IB 包**，`v25.12.2-ib-x86-64-r2` |
+| apk 来源 | 官方源 | 官方源 | **自建 pkg 包**，`v25.12.2-pkg-x86-64-r2` |
+| 版本下拉 | 2 档（25.12.0 / 25.12.1） | 7 档（24.10.0 ~ 24.10.6） | **1 档（25.12.2），不可切** |
+| 主 config | `imm25.config` 303,813 B / 8,266 行 | `imm.config` 284,106 B / 7,705 行 | `imm25.config` 303,823 B / 8,272 行 |
+| `=y` / `=m` | 968 / 1,238 | 952 / 1,005 | 1,004 / 1,227 |
+| 构建脚本 | `build25.sh` 56,581 B / 1,028 行 | `build24.sh` 47,780 B / 906 行 | `build25.sh` 63,180 B / 1,146 行 |
+| 自定义包清单 | `apk-custom-packages.sh` 11,110 B | `custom-packages.sh` 11,263 B | `apk-custom-packages.sh` 11,356 B |
+| 内核 | 官方 | 官方 | **自建，ftrace 五项 + BTF，hash `26ed6bc1`** |
+| honk 组 apk | 无 | 无 | **5 个，构建时从 `honk-apk` Release 取** |
+| `sha256/` 目录 | 无 | 无 | **有** |
+| CrowdSec LXC / rootfs-skel / 网络校验 | 有 | 有 | 有 |
+| 版本日志 | README 2,773 行 | 不重复，见 25.12 | 不重复，见 25.12 |
+
+**本仓库就是那份完整说明**：CrowdSec LXC 的整套运行期逻辑、网络与防火墙的逐条校验、`rootfs-skel` 契约、v.103 起的完整版本日志，都在下面。
+
+---
+
 # IP网关DNS为固定，请提前规划。
 
 # 整体流程
