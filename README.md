@@ -34,7 +34,7 @@ ImmortalWrt **25.12.x** x86-64 固件构建线：官方 ImageBuilder 直接出�
 - `x86-64/imm25.config` 里勾选的包
 - `x86-64/build25.sh` 里写的后处理
 
-固件开机后自己把 CrowdSec 容器拉起来，那套运行期逻辑（旁路三件、LAPI 组细部、网络与防火墙校验、`rootfs-skel` 契约）全部写在 [CROWDSEC.md](CROWDSEC.md)，本文不再重复。第三方插件清单见 [PACKAGES.md](PACKAGES.md)，支持的机型见 [SUPPORT.md](SUPPORT.md)。
+固件开机后自己把 CrowdSec 容器拉起来，那套运行期逻辑（旁路三件、LAPI 组细部、网络与防火墙校验、`rootfs-skel` 契约）全部写在 [CROWDSEC.md](CROWDSEC.md)，本文不再重复。
 
 ---
 
