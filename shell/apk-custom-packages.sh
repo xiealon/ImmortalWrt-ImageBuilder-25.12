@@ -11,14 +11,14 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-rtp2httpd luci-i18n-rtp2httpd-zh-cn"
 #   穿透   → tailscale + cloudflared + nps（留这三个，见下方 zerotier/xfrpc/eoip/ngrokc 各处说明）
 # 当日 201 实测：/etc/lucky 目录 0 个文件、option enabled '0' —— 装了从未配置，
 # 留着只是多一个从没验证过的黑盒。cp /etc/config/lucky 里 configdir 指向它。
-# honk：25.12 上替代 daed 的 eBPF 代理引擎（硬要求内核 6.12+）。
-# doona 管理界面内嵌在 honk-core 里，访问 http://<LAN IP>:9527/（必须用 IP，不认主机名）。
-# luci-app-honk 只负责 Services → honk 的启停/升级，节点与路由仍在 doona 里配。
-# 包来自 xiealon/CloudRunFilesBuilder 的 honk-apk Release，由 build25.sh 下到 packages/，
-# 所以这里不带 @tag —— 走的是本地包，不是 apk 源。
-# luci-lib-daeuniverse 是 luci-app-honk 的运行依赖；vmlinux-btf-builtin 是 BTF 哨兵，
-# 显式列出是为了让「缺包」在构建期就暴露，而不是靠依赖解析碰运气。
-CUSTOM_PACKAGES="$CUSTOM_PACKAGES honk luci-app-honk luci-lib-daeuniverse luci-i18n-daeuniverse-zh-cn vmlinux-btf-builtin"
+# honk（eBPF 代理，硬要求内核 6.12+ 且开 DYNAMIC_FTRACE + BTF）在本线默认关闭，
+# 因为官方镜像的内核不带那几项。详见下方注释。
+# 【主线仓】默认不装 honk：官方 ImageBuilder 的内核没有 CONFIG_DYNAMIC_FTRACE /
+# CONFIG_DEBUG_INFO_BTF，honk 是 eBPF 代理，靠 fentry/fexit 挂内核函数，装上也是
+# honk-core 起不来。要能跑起来的 honk 请用 25.12-honk 仓（自建内核）。
+# 想在本线试装：取消下面这行注释 —— 包会从 CloudRunFilesBuilder 的 honk-apk
+# Release 取到 packages/，走本地包不走 apk 源；能装、能进 LuCI，就是起不来。
+#CUSTOM_PACKAGES="$CUSTOM_PACKAGES honk luci-app-honk luci-lib-daeuniverse luci-i18n-daeuniverse-zh-cn vmlinux-btf-builtin"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES geoview sing-box luci-compat kmod-tun kmod-inet-diag kmod-nft-tproxy kmod-nft-socket bash curl lua unzip"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES clashoo luci-app-clashoo luci-i18n-clashoo-zh-cn"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES yq kmod-dummy ca-bundle"
