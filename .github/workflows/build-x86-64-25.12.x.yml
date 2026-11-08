@@ -1,0 +1,644 @@
+name: Build 25.12.x x86-64
+# trigger-index-rebuild: 2026-11-09 仓库由 IMMORTALWRT-HONK 改名为 25.12 后
+# GitHub 未重建 workflow 索引（/actions/workflows 返回 total=0），
+# 改动本文件一次可强制重新扫描。功能零影响。
+
+on:
+  workflow_dispatch:
+    inputs:
+      # 【honk 线】只剩 25.12.2 一档。这一项在本线已经不参与编译 ——
+      # 内核和工具链都来自自建 IB 包（v25.12.2-ib-x86-64），跟这个下拉框无关。
+      # 不删是因为 workflow_dispatch 少一项容易让人以为「还能切回 25.12.1」，
+      # 留一个不可切换的 25.12.2 反而是最清楚的说明。
+      Luci Version:
+        description: "版本（本线固定 25.12.2，内核来自自建 IB 包，不可切换）"
+        required: false
+        default: "25.12.2"
+        type: choice
+        options:
+          - 25.12.2
+      Router IP:
+        description: "请设置路由器的管理地址(仅对多网口路由器有效) 格式:192.168.x.1 或 10.x.x.1"
+        required: true
+        default: "192.168.1.201"
+      Router Netmask:
+        description: "子网掩码，留空默认 255.255.255.0。非 /24 时必须在下面显式填网关"
+        required: false
+      Router Gateway:
+        description: "网关地址，留空则自动取管理地址同网段的首个地址(如 192.168.100.1)。非 /24 网段请务必手填"
+        required: false
+        default: "192.168.1.1"
+      Router DNS:
+        description: "DNS 地址，留空则跟随网关"
+        required: false
+      # 【v.108.46】原来的 Container IP / Bridge IP 两个输入已删除，原因是它们制造了
+      # 两份真相：「编译期常量」和「写进固件的 custom_*_ip.txt」。容器内的网络配置文件
+      # 由 bootstrap 每轮按其中一份重写，于是那个文件既说不清谁是准的、也进不了 guard
+      # （进去了就是 bootstrap 写、guard 盖回，每 60 秒一轮）。
+      # 现在固定为 10.1.0.10 / 10.1.0.1，唯一来源是 rootfs-skel/etc/crowdsec-net.conf：
+      #   · prepare 用它装进容器镜像（tarball）
+      #   · build24/25.sh 把同一个文件拷进固件，成为 /rom 只读基准
+      #   · crowdsec-guard 逐字节比对，被改坏 60 秒内复原
+      # 要换网段：改 rootfs-skel/etc/crowdsec-net.conf 后重新构建，不要指望这里能填。
+      # DNS 同样固定为网桥 IP（容器查路由器 dnsmasq，上游 DNS 由路由器自己跟）。
+      # 历史：曾经下拉框只有 2G/3G/4G，白名单里却写着 10G ——
+      # 选 10G 能过白名单，但 ROOTFS_SIZE 的 case 没有对应分支，直接
+      # "未知 profile=10G" exit 1。那是映射漏了一段，不是磁盘问题。
+      # 教训：下拉框 / 白名单 / 映射 这三处必须永远一起改，只改一处就是埋雷。
+      # 注意「分区大小」和「固件大小」是两件事：img 里未使用的空间全是零，
+      # gzip 压完仍然只有几百 MB，224G 分区出的固件也能正常下载/刷写。
+      # 档位语义（重要）：2G~8G 那批「裸分区」档已经放弃，改成「你的盘多大就选多大」。
+      # 没有例外档：12G 已删，现在每个档位都对应一块真实存在、且装得下的硬盘。
+      # 注意 default 必须同步改成选项内的值 —— 否则 workflow_dispatch 会因为
+      # 默认值不在 options 里直接报错，连页面都打不开。
+      # 【大容量档：按「硬盘标称」选，根分区不是标称值】
+      # 32G/64G/128G/256G 四档照硬盘规格给，rootfs 已经替你扣掉两样东西：
+      #   1) 厂商标称按 10^9 算，换算成 GiB 要乘 0.9313：
+      #      32G→29.8GiB、64G→59.6GiB、128G→119.2GiB、256G→238.4GiB
+      #      （实际盘还会再小几百 MB，杂牌 U 盘更明显）
+      #   2) 预留 swap：32G 档留 6G，64G/128G/256G 各留 8G。
+      #      注意 swap 要你自己在设备上建（分区或 swapfile），固件不代劳。
+      # 最后再留 1.5~6G 给分区表 / EFI / kernel / 四舍五入。折算结果：
+      #      32G  盘 → rootfs 22G（22528）   22 + 6 swap = 28，余 ~1.8G
+      #      64G  盘 → rootfs 50G（51200）   50 + 8 swap = 58，余 ~1.6G
+      #      128G 盘 → rootfs 108G（110592） 108 + 8 swap = 116，余 ~3.2G
+      #      256G 盘 → rootfs 224G（229376） 224 + 8 swap = 232，余 ~6.4G
+      # 【小盘档：8G / 16G 按硬盘标称，rootfs 都留了余量】
+      #   8G  盘 7.45GiB → rootfs 4G（4096），余 3.4G 给分区表 / EFI / 2~3G swap
+      #   16G 盘 14.9GiB → rootfs 10G（10240），余 4.9G 给分区表 / EFI / 4G swap
+      # 两档都不是压线：16G 盘装 10G rootfs 还剩 4.9G，够放 4G swap 加分区表；
+      # 8G 盘装 4G rootfs 还剩 3.4G。
+      # 【10G / 12G / 20G 已删】10G 盘 9.3GiB、12G 盘 11.2GiB、20G 盘 18.6GiB，
+      #      都装不下同名的 rootfs（12GiB 的 rootfs 塞不进 11.2GiB 的盘），
+      #      留着就是「选了就变砖」的选项。
+      Profile:
+        description: '格式「硬盘标称→rootfs 分区」。左边是你手上那块盘的标称容量（非实际容量，实际约标称×0.93，还要扣分区表/EFI 和预留 swap）；右边才是固件真正建出来的 rootfs 大小'
+        required: true
+        type: choice
+        default: '16G盘→rootfs 10G'
+        options:
+          - '8G盘→rootfs 4G'
+          - '16G盘→rootfs 10G'
+          - '32G盘→rootfs 22G'
+          - '64G盘→rootfs 50G'
+          - '128G盘→rootfs 108G'
+          - '256G盘→rootfs 224G'
+      Enable Store:
+        description: "集成 store 商店"
+        required: false
+        type: boolean
+        default: true
+      # 【v.107.7】原来这里有个 Include Crowdsec=yes/no 开关，已删除。
+      # 容器是固件的一部分，不是可选件。留开关的后果：选 no 时 185MB 镜像不进固件，
+      # 而 Router IP / 掩码 / 网关 / DNS 照样写进 custom/*.txt、由开机引导的
+      # PREP 组消费 —— 用户填了地址却不生效，固件停在默认 192.168.1.1，
+      # 日志里只有一行「无镜像且无 rootfs」，看不出根因。锁死，不给这个组合留门。
+      Crowdsec Enroll Key:
+        description: "CrowdSec 控制台注册密钥（app.crowdsec.net 的 enrollment key）；留空则只跑本地 bouncer/LAPI，不开通控制台账号绑定"
+        required: false
+        default: ''
+        type: string
+        
+permissions:
+  contents: write
+
+# 两个 workflow 都往固定 tag（Autobuild-x86-64）发资产，同时跑就是互相覆盖成半成品。
+# 串行化同一条流水线（不取消进行中的），避免 A 的产物被 B 覆盖。
+concurrency:
+  # 两个 workflow 都往固定 tag（Autobuild-x86-64）发资产。原来 group 里带了
+  # ${{ github.workflow }}，导致 24.10 与 25.12 属于两个不同的组 —— 注释说「串行化」，
+  # 实际却是并行，双方互相覆盖同一个 Release 的资产。这里去掉 workflow 名与 ref，
+  # 让整条 x86-64 流水线共用一个组，真正排队执行。
+  group: imagebuilder-autobuild-x86-64
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # 【honk 线】runs-on 必须是 24.04，不能退回 22.04。
+    # 本线用的 ImageBuilder 包是在 Ubuntu 24.04 里自建的，staging_dir/host/bin/*
+    # 依赖 glibc 2.39；22.04 的 glibc 是 2.35，一开跑就是
+    #   /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.38' not found
+    # 换镜像也救不了：官方 immortalwrt/imagebuilder 镜像的内核没有 DYNAMIC_FTRACE。
+    runs-on: ubuntu-24.04
+    # 【CrowdSec 版本】留空 = 跟随 packagecloud 最新：CloudRunFilesBuilder 的 crowdsec-lxc 分支每周按最新重建一次，
+    # 本构建直接取它的产物，不再做版本比对（镜像「内容是否同一份代码」仍由指纹严格保证）。
+    # 想临时钉死某版：这里改成 "1.8.1" 这类版本号，并把 build-lxc-tarball.yml 的同一行改成一致。
+    # 注意「跟最新」的代价：主仓代码不动，上游 crowdsec 升级也会悄悄进入固件，
+    # 所以下面会把实际用到的版本写进 Release 说明（router-info.md），保证可回溯。
+    env:
+      CROWDSEC_VERSION: ""
+    # docker run / git clone 卡住会吃满 6 小时默认上限，显式收口。
+    # 120 -> 180：大档位不是「产物变大」，是压缩器要把整个分区的逻辑字节读一遍。
+    # 本支用 libdeflate-gzip，零数据实测比 zlib 快 2~3 倍，224G 单遍约 10~15 分钟，
+    # 两遍 20~30 分钟；但仍与 24.10 保持同一上限，免得两个仓库的窗口不一致。
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Set Executable Permissions
+        run: chmod +x ${{ github.workspace }}/x86-64/build25.sh
+
+      # 先把 runner 自带、本构建完全用不到的工具链删掉。
+      # 实测 GitHub 托管 runner 是 146G 盘（不是文档里说的 14G），清完剩 109G 可用，
+      # 所以下面几步不是「抢救几个 G」，是给两遍 make image 的中间产物留余量。
+      # 注意：20G 档失败的真因不是磁盘，是 Image/pad-to 里 dd bs=$(2) 会按分区大小
+      # 预分配整块内存（20G 档 = 20GiB 缓冲）直接 OOM —— 那一段由 build 脚本
+      # 打成 bs=1M + truncate，跟这里的清理是两件事，别把账算混。
+      - name: Free Disk Space
+        run: |
+          echo "== 清理前 ==" && df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost /opt/hostedtoolcache 2>/dev/null || true
+          sudo apt-get clean || true
+          echo "== 清理后 ==" && df -h /
+
+      - name: Validate Crowdsec Build Parameters
+        env:
+          CS_KEY: ${{ inputs['Crowdsec Enroll Key'] }}
+          CS_PROFILE: ${{ inputs['Profile'] }}
+        run: |
+          # 【v.108.46】容器 IP / 网桥 IP / DNS 已固定，不再从输入取。
+          # 唯一来源 rootfs-skel/etc/crowdsec-net.conf，这里只做「读得到、能解析」的自检。
+          NET_CONF="${{ github.workspace }}/rootfs-skel/etc/crowdsec-net.conf"
+          [ -s "$NET_CONF" ] || { echo "::error::缺 rootfs-skel/etc/crowdsec-net.conf（容器 IP 的唯一来源）"; exit 1; }
+          CS_CT_IP=$(sed -n 's/^ADDRESS=\([0-9][0-9.]*\)\/[0-9][0-9]*$/\1/p' "$NET_CONF" | head -n1)
+          CS_BRIDGE_IP=$(sed -n 's/^GATEWAY=//p' "$NET_CONF" | head -n1)
+          [ -n "$CS_CT_IP" ] && [ -n "$CS_BRIDGE_IP" ] \
+              || { echo "::error::net.conf 解析不出 ADDRESS/GATEWAY（格式：ADDRESS=x.y.z.w/24 与 GATEWAY=x.y.z.w）"; exit 1; }
+          echo "CS_CT_IP=$CS_CT_IP"         >> $GITHUB_ENV
+          echo "CS_BRIDGE_IP=$CS_BRIDGE_IP" >> $GITHUB_ENV
+          echo "容器网络（固定值，来自 rootfs-skel）: IP=$CS_CT_IP 网关/DNS=$CS_BRIDGE_IP 掩码=255.255.255.0"
+          echo "::notice::容器 IP/网关/DNS 固定为 $CS_CT_IP / $CS_BRIDGE_IP；要改请改 rootfs-skel/etc/crowdsec-net.conf 并重新构建"
+
+          # 档位只认下面白名单里的值。传了别的（旧脚本、API 调用、手敲）一律失败，
+          # 不要「自动纠正」到最接近的档 —— 那样出来的固件和填的对不上，比报错更难查。
+          # 注意：Profile 的选项文本是「8G盘→rootfs 4G」这种自带标注的串，
+          # 所以这里一律用前缀匹配（8G盘*）。若改成精确匹配，以后动一下标注文案就全线报错。
+          case "$CS_PROFILE" in
+            8G盘*|16G盘*|32G盘*|64G盘*|128G盘*|256G盘*) ;;
+            *)
+              echo "::error::Profile=$CS_PROFILE 不合法：只支持 8G盘/16G盘/32G盘/64G盘/128G盘/256G盘，请重选后重跑"
+              exit 1
+              ;;
+          esac
+
+          CS_ENROLL=no
+          if [ -n "$CS_KEY" ]; then
+            CS_ENROLL=yes
+            echo "✅ 已提供注册密钥，将开通控制台账号绑定"
+          else
+            echo "✅ 未提供注册密钥，跳过账号绑定（本地 bouncer/LAPI 功能不受影响）"
+          fi
+
+          if [ "$CS_ENROLL" = "yes" ]; then
+            CUSTOM="${{ github.workspace }}/custom"
+            mkdir -p "$CUSTOM"
+            printf '%s\n' "$CS_KEY" > "$CUSTOM/crowdsec_enroll_key.txt"
+            echo "已写入注册密钥 → custom/crowdsec_enroll_key.txt"
+          fi
+
+          CUSTOM="${{ github.workspace }}/custom"
+          mkdir -p "$CUSTOM"
+          echo "CS_ENROLL=$CS_ENROLL" >> $GITHUB_ENV
+          echo "校验结果: CS_ENROLL=$CS_ENROLL（容器恒内置，无开关）"
+
+      - name: Save Router Network Config Into OpenWrt Files
+        env:
+          # 走 env 中转：把用户输入直接内插进 run: 时，${{ }} 会先被当作脚本片段展开，
+          # 值里带双引号 / $( ) / ; 就等于一次命令注入。
+          IN_IP: ${{ github.event.inputs['Router IP'] }}
+          IN_NETMASK: ${{ github.event.inputs['Router Netmask'] }}
+          IN_GATEWAY: ${{ github.event.inputs['Router Gateway'] }}
+          IN_DNS: ${{ github.event.inputs['Router DNS'] }}
+        run: |
+          CUSTOM="${{ github.workspace }}/custom"
+          mkdir -p "$CUSTOM"
+
+          printf '%s\n' "$IN_IP"      > "$CUSTOM/custom_router_ip.txt"
+          printf '%s\n' "$IN_NETMASK" > "$CUSTOM/custom_router_netmask.txt"
+          printf '%s\n' "$IN_GATEWAY" > "$CUSTOM/custom_router_gateway.txt"
+          printf '%s\n' "$IN_DNS"     > "$CUSTOM/custom_router_dns.txt"
+
+          echo "已写入: IP=$(cat "$CUSTOM/custom_router_ip.txt")"
+          echo "        掩码=[$(tr -d '\r\n' < "$CUSTOM/custom_router_netmask.txt")]"
+          echo "        网关=[$(tr -d '\r\n' < "$CUSTOM/custom_router_gateway.txt")]"
+          echo "        DNS=[$(tr -d '\r\n' < "$CUSTOM/custom_router_dns.txt")]"
+
+
+      - name: Enable Store Integration
+        run: |
+          if [ "${{ github.event.inputs['Enable Store'] }}" == "true" ]; then
+            echo 'CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-store"' >> shell/apk-custom-packages.sh
+            echo "✅ 已追加 luci-app-store"
+          else
+            echo "❎ 未启用 luci-app-store"
+          fi
+
+      - name: Lint Shell Scripts
+        run: |
+          # 极简 rootfs 阶段：容器能不能起来，全看这几个 shell 脚本。
+          # 语法错误拖到 make image 之后才炸要等一小时，这里 10 秒就拦住。
+          for f in shell/prepare-crowdsec-minimal.sh \
+                   files/usr/sbin/crowdsec-lxc-bootstrap.sh \
+                   files/etc/rc.local \
+                   files/etc/uci-defaults/99-custom.sh; do
+            bash -n "$f" || { echo "::error::$f 语法错误"; exit 1; }
+          done
+          if command -v shellcheck >/dev/null 2>&1; then
+            shellcheck -S error shell/prepare-crowdsec-minimal.sh \
+              || { echo "::error::shellcheck 在构建脚本上发现硬错误"; exit 1; }
+          else
+            echo "shellcheck 不在，跳过（bash -n 已过）"
+          fi
+
+      - name: Download prebuilt Crowdsec LXC tarball (CloudRunFilesBuilder lxc-* Release)
+        id: lxc_prebuilt
+        # 【v.108.59】唯一来源：CloudRunFilesBuilder 的 crowdsec-lxc 分支产出的 rootfs tarball。
+        # 本仓原来还有一条「本地 apt 拉包 + 打包」的回退，已经删掉 —— 容器出包这件事
+        # 早就分到独立分支 crowdsec-lxc 了，留着两条路只会让「包没下到」被本地构建盖过去。
+        # 现在取不到就在这一步 ::error:: + exit 1，不会走到 make image 才报。
+        #
+        # 判据是 MANIFEST 里的 prepare_script_sha256 / rootfs_skel_sha256 与当前仓库
+        # 逐字节一致 —— 只认「同一份代码产出的镜像」。
+        # 注意 shell/prepare-crowdsec-minimal.sh 与 rootfs-skel/ 的所有权仍在本仓：
+        # crowdsec-lxc 分支的 workflow 会 checkout 本仓来跑那个脚本、用这个 skel 算指纹。
+        # 这两处一改，本地指纹立刻和新包对不上，构建会红 —— 必须先去那边 dispatch 一次
+        # 重新出包（那边没有 schedule，只能手动触发）。
+        run: |
+          set -uo pipefail
+          OUT_DIR="files/etc/crowdsec"
+          OUT="$OUT_DIR/lxc-crowdsec.tar.gz"
+          mkdir -p "$OUT_DIR"
+          SHORT="${GITHUB_SHA:0:7}"
+          BASE="https://github.com/xiealon/CloudRunFilesBuilder/releases/download"
+          L_SCRIPT="$(sha256sum shell/prepare-crowdsec-minimal.sh | awk '{print $1}')"
+          L_SKEL="$(find rootfs-skel -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
+          echo "[预构建] 本地指纹 script=$L_SCRIPT skel=$L_SKEL"
+          echo "[预构建] 候选顺序：lxc-${SHORT}（本次 commit 专属）→ lxc-latest（滚动）"
+          OK=0
+          REASON=""
+          WANT="${CROWDSEC_VERSION:-}"
+          if [ -n "$WANT" ]; then
+            echo "[预构建] 期望 crowdsec 版本：$WANT（YAML 里写死；manifest 对不上就不用）"
+          else
+            echo "[预构建] 未锁版本，接受任意 crowdsec 版本"
+          fi
+          for TAG in "lxc-${SHORT}" "lxc-latest"; do
+            MAN="$(mktemp)"
+            if ! curl -fsSL --max-time 60 --connect-timeout 15 --retry 3 --retry-delay 2 \
+                 "$BASE/$TAG/MANIFEST.json" -o "$MAN"; then
+              echo "[预构建] $TAG：取不到 MANIFEST.json（该 sha 尚未构建过），跳过"
+              REASON="$REASON $TAG=无MANIFEST"
+              continue
+            fi
+            M_SCRIPT="$(jq -r '.prepare_script_sha256 // empty' "$MAN")"
+            M_SKEL="$(jq -r '.rootfs_skel_sha256 // empty' "$MAN")"
+            M_SHA="$(jq -r '.source_short // empty' "$MAN")"
+            M_CS="$(jq -r '.crowdsec_version // "?"' "$MAN")"
+            M_ENT="$(jq -r '.tarball_entries // "?"' "$MAN")"
+            if [ "$M_SCRIPT" != "$L_SCRIPT" ] || [ "$M_SKEL" != "$L_SKEL" ]; then
+              echo "[预构建] $TAG：指纹不符（manifest script=${M_SCRIPT:0:12} skel=${M_SKEL:0:12}），跳过"
+              REASON="$REASON $TAG=指纹不符"
+              continue
+            fi
+            # 版本闸门：只比指纹是不够的 —— lxc-latest 每周会滚，指纹相同但 crowdsec 版本可能变了，
+            # 那样「写死的版本」会被预构建悄悄换掉。这里必须显式比对。
+            if [ -n "$WANT" ]; then
+              case "$M_CS" in
+                "$WANT"|"$WANT"-*|"$WANT"~*|"$WANT"+*) : ;;
+                *)
+                  echo "[预构建] $TAG：crowdsec 版本 $M_CS ≠ 期望 $WANT，跳过"
+                  REASON="$REASON $TAG=版本不符(${M_CS})"
+                  continue
+                  ;;
+              esac
+            fi
+            echo "[预构建] $TAG：指纹匹配 → 来源 ${M_SHA}，crowdsec ${M_CS}，${M_ENT} 个条目"
+            if ! curl -fL --max-time 900 --connect-timeout 15 --retry 3 --retry-delay 2 \
+                 --retry-all-errors "$BASE/$TAG/lxc-crowdsec.tar.gz" -o "$OUT"; then
+              echo "[预构建] $TAG：tarball 下载失败，尝试下一个"
+              REASON="$REASON $TAG=下载失败"
+              continue
+            fi
+            # 完整性兜底：截断的 gz 在这里就会报错，避免把坏包打进固件
+            if ! tar -tzf "$OUT" >/dev/null 2>&1; then
+              echo "[预构建] $TAG：下载到的 tar.gz 解列失败（疑似截断），丢弃"
+              REASON="$REASON $TAG=包损坏"
+              rm -f "$OUT"
+              continue
+            fi
+            echo "[预构建] 命中 $TAG：$(ls -lh "$OUT" | awk '{print $5}')，条目 $(tar -tzf "$OUT" | wc -l)"
+            {
+              echo "ok=true"
+              echo "tag=$TAG"
+              echo "crowdsec=$M_CS"
+            } >> "$GITHUB_OUTPUT"
+            printf 'version=%s\nsource=prebuilt(%s)\n' "$M_CS" "$TAG" \
+              > "$GITHUB_WORKSPACE/crowdsec-build.txt"
+            OK=1
+            break
+          done
+          if [ "$OK" != "1" ]; then
+            rm -f "$OUT"
+            echo "[预构建] 未取得可用 tarball（原因：${REASON# }）→ 没有回退可走"
+            # 失败也写进 step summary：退出以后日志能翻，摘要页面上却只剩空白。
+            {
+              echo "### Crowdsec LXC rootfs 来源"
+              echo ""
+              echo "- **取不到**：${REASON# }"
+              echo "- 本仓不再本地构建容器镜像（v.108.59），没有基底就不产出固件"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::未取得可用的 Crowdsec LXC 基底（原因：${REASON# }）—— 去 CloudRunFilesBuilder 的 build-lxc-tarball.yml 手动 dispatch 一次，或确认 lxc-latest 的 MANIFEST 指纹与本次 commit 一致"
+            exit 1
+          fi
+          # 失败那条已经在上面 exit 了，这里只剩命中一种情况，不再留死分支。
+          {
+            echo "### Crowdsec LXC rootfs 来源"
+            echo ""
+            echo "- 预构建命中：CloudRunFilesBuilder Release \`$TAG\`，crowdsec \`$M_CS\`"
+            echo "- 指纹校验：prepare_script / rootfs_skel 与本次 commit 一致"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # 【honk 线】不用官方 immortalwrt/imagebuilder 镜像，改用自建的 ImageBuilder 包。
+      #
+      # 为什么必须换：ImageBuilder 不编译内核 —— 内核是包里预编译好的那一个。
+      # 官方镜像（immortalwrt/imagebuilder:x86-64-openwrt-25.12.x）的内核没有
+      # CONFIG_DYNAMIC_FTRACE / _WITH_REGS / _WITH_DIRECT_CALLS，所以在 imm25.config
+      # 里写多少行 CONFIG_KERNEL_DYNAMIC_FTRACE=y 都改不动它 —— 那几行在 ImageBuilder
+      # 阶段不参与内核构建，只是配置回显。honk 是 eBPF 代理，靠 fentry/fexit 挂内核函数，
+      # 没有 DYNAMIC_FTRACE 直接起不来。
+      #
+      # 这个包（immortalwrt-artifacts 的 v25.12.2-ib-x86-64-r2）实测内核 6.12.103：
+      #   CONFIG_DYNAMIC_FTRACE=y / _WITH_REGS=y / _WITH_DIRECT_CALLS=y
+      #   CONFIG_FUNCTION_TRACER=y / CONFIG_DEBUG_INFO_BTF=y
+      # 哈希钉死：包被换掉时这一步直接红，不会悄悄产出一份没有 ftrace 的固件。
+      - name: Prepare local ImageBuilder (honk kernel)
+        run: |
+          set -e
+          IB_URL="https://github.com/xiealon/immortalwrt-artifacts/releases/download/v25.12.2-ib-x86-64-r2/immortalwrt-imagebuilder-25.12.2-x86-64.Linux-x86_64.tar.zst"
+          IB_SHA="73abe42d053fbc5a261235c08142704cdc253ff9e05ea7b9e0e2cb5e75b312e8"
+          IB="${{ github.workspace }}/ib"
+
+          echo "==> 下载 ImageBuilder（honk 内核）"
+          curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 600 \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -o /tmp/ib.tar.zst "$IB_URL"
+          echo "==> 校验 sha256"
+          echo "$IB_SHA  /tmp/ib.tar.zst" | sha256sum -c -
+
+          command -v zstd >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y zstd; }
+          mkdir -p "$IB"
+          echo "==> 解压"
+          tar -I zstd -xf /tmp/ib.tar.zst -C "$IB" --strip-components=1 --no-same-owner
+          rm -f /tmp/ib.tar.zst
+
+          # ---------------------------------------------------------------
+          # 【honk 线 · 2026-11-03】把自建内核配套的 apk 全集灌进 IB。
+          #
+          # 为什么必须灌：ImageBuilder 不编 kmod，1,204 个内核模块全靠外部源。
+          # 而 downloads.immortalwrt.org 的 kmods 目录下只有官方那一个 hash：
+          #   releases/25.12.2/targets/x86/64/kmods/6.12.103-1-0413601b1c3f0490e17f340fe09229ea/
+          # 我们这个 IB 的内核是自建 honk 内核，hash 是 26ed6bc1 —— 实测那条
+          # packages.adb 返回 404，于是所有 kmod-*、kernel、base-files 全部
+          # 「(no such package)」，make image 直接 Error 99。
+          #
+          # 这份 pkg 包里就是同一次编译产出的全部 1,688 个 apk（1,204 kmod +
+          # 484 其他 + kernel 本尊），内核 hash 与 IB 完全一致，天生配套。
+          # 落在 packages/official/ 子目录（不平铺），因为 build25.sh 的「来源 A」
+          # 会把 packages/*.apk 无差别拷进 /root/apk-cache —— 那是要打进固件的，
+          # 1,688 个包会凭空多出几百 MB。放子目录既不触发那条通配，又能被
+          # build25.sh 生成的索引收录。
+          # ---------------------------------------------------------------
+          PKG_URL="https://github.com/xiealon/immortalwrt-artifacts/releases/download/v25.12.2-pkg-x86-64-r2/packages-x86_64-25.12.2.tar.zst"
+          PKG_SHA="7af7a3a914ae3876e32890150c7bf001a80d160a0ee6769796fc25669478c1a4"
+
+          echo "==> 下载 apk 全集（自建内核配套包）"
+          curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 900 \
+            -o /tmp/pkg.tar.zst "$PKG_URL"
+          echo "==> 校验 sha256"
+          echo "$PKG_SHA  /tmp/pkg.tar.zst" | sha256sum -c -
+
+          # 只解根层 packages/*.apk（扁平那 1,688 个）；packages/x86_64/ 那 397 条
+          # 是 feed 归档，带子目录，ImageBuilder 的 packages/ 是平层，用不上。
+          rm -rf /tmp/pkgx && mkdir -p /tmp/pkgx
+          tar -I zstd -xf /tmp/pkg.tar.zst -C /tmp/pkgx --wildcards 'packages/*.apk' --no-same-owner
+          rm -f /tmp/pkg.tar.zst
+
+          mkdir -p "$IB/packages/official"
+          cp -f /tmp/pkgx/packages/*.apk "$IB/packages/official/"
+          rm -rf /tmp/pkgx
+
+          PKG_N=$(ls "$IB/packages/official"/*.apk 2>/dev/null | wc -l)
+          PKG_K=$(ls "$IB/packages/official"/kmod-*.apk 2>/dev/null | wc -l)
+          echo "==> 已灌入 $PKG_N 个 apk（其中 kmod $PKG_K 个）→ \$IB/packages/official/"
+
+          # 内核包必须与 IB 自带的那份【同一个 hash】。防的是：Release 里的 pkg 包
+          # 被换成另一次编译的产物 —— 那样 kmod 的 kernel(=...) 依赖会对不上，
+          # 构建照样能跑完，但装包阶段才炸，而且报错点离根因很远。
+          IB_KRATIO=$(ls "$IB/packages"/kernel-6.12.*-r1.apk 2>/dev/null | head -n1)
+          PK_KRATIO=$(ls "$IB/packages/official"/kernel-6.12.*-r1.apk 2>/dev/null | head -n1)
+          if [ -z "$IB_KRATIO" ] || [ -z "$PK_KRATIO" ]; then
+            echo "::error::找不到 kernel 包（IB=$IB_KRATIO / pkg=$PK_KRATIO）"
+            exit 1
+          fi
+          if [ "$(basename "$IB_KRATIO")" != "$(basename "$PK_KRATIO")" ]; then
+            echo "::error::内核 hash 不一致，kmod 依赖必然对不上"
+            echo "::error::IB 里：$(basename "$IB_KRATIO")"
+            echo "::error::pkg 里：$(basename "$PK_KRATIO")"
+            exit 1
+          fi
+          echo "==> 内核 hash 一致：$(basename "$IB_KRATIO")"
+
+          if [ "$PKG_K" -lt 1100 ]; then
+            echo "::error::kmod 只有 $PKG_K 个（预期 1204），内核模块库不完整"
+            exit 1
+          fi
+
+          # repositories 里那条 kmods 源指向官方 hash（0413601b），与我们这个内核
+          # 无关，每次构建都会重试 4 秒再吞一条 warning。本地已有全量 kmod，
+          # 直接删掉这行，省掉 100+ 条噪音。
+          #
+          # video 那条同理，但原因是上游根本没发这个 feed：实测
+          #   packages/x86_64/base|luci|packages|routing|telephony/packages.adb  全 200
+          #   packages/x86_64/video/packages.adb                                 404
+          # 25.12 的 video feed 没构建出来。apk 每装一个包都会重试它一次，
+          # 578 个包就是几百行 "No such file or directory"，把真正的错挤没了。
+          # 我们装的包里没有 video feed 的东西，删掉不影响任何依赖。
+          if [ -f "$IB/repositories" ]; then
+            sed -i -e '\#/kmods/#d' -e '\#/packages/x86_64/video/#d' "$IB/repositories"
+            echo "==> 已移除 repositories 里的 kmods 源与 video 源（上游 404）"
+            echo "==> 剩余源 $(grep -c . "$IB/repositories") 条："
+            sed 's|^|      |' "$IB/repositories"
+          fi
+
+          # 内核配置复核：包里的 .config 必须真的带 ftrace 五项。
+          # 防的不是下载出错，是「Release 资产被人换成官方 IB」之后整条线静默降级成
+          # 一份能开机、但 honk 起不来的固件。
+          KCFG=$(find "$IB/build_dir" -path '*linux-x86_64/linux-*/.config' 2>/dev/null | head -n1)
+          if [ -n "$KCFG" ]; then
+            for k in CONFIG_DYNAMIC_FTRACE CONFIG_DYNAMIC_FTRACE_WITH_REGS \
+                     CONFIG_DYNAMIC_FTRACE_WITH_DIRECT_CALLS CONFIG_FUNCTION_TRACER \
+                     CONFIG_DEBUG_INFO_BTF; do
+              grep -qx "$k=y" "$KCFG" || { echo "::error::IB 内核缺 $k（$KCFG）—— honk 会起不来"; exit 1; }
+            done
+            echo "==> 内核配置复核通过：ftrace/BTF 五项全开"
+          else
+            echo "::warning::没找到 IB 的内核 .config，跳过复核"
+          fi
+
+          # build25.sh 里写死了 /home/build/immortalwrt（12 处以上：packages/、
+          # repositories.conf、files/etc/config、make image 的 FILES=）。不再进容器，
+          # 就用软链把这个路径指到解压目录，脚本一个字都不用改。
+          sudo mkdir -p /home/build
+          sudo ln -sfn "$IB" /home/build/immortalwrt
+
+          # 产物目录：原来靠 -v 挂到容器的 bin/，现在让 workspace/bin 指向 IB/bin，
+          # 后面「产物文件名加档位后缀」「上传 Release」照旧读 $GITHUB_WORKSPACE/bin。
+          mkdir -p "$IB/bin"
+          rm -rf "${{ github.workspace }}/bin"
+          ln -sfn "$IB/bin" "${{ github.workspace }}/bin"
+
+          # 仓库侧的输入挂进去（等价于原来的 7 个 -v）。
+          cp -f "${{ github.workspace }}/x86-64/imm25.config" "$IB/.config"
+          cp -f "${{ github.workspace }}/x86-64/build25.sh" "$IB/build.sh"
+          chmod +x "$IB/build.sh"
+          for d in files shell custom rootfs-skel tests; do
+            [ -d "${{ github.workspace }}/$d" ] || { echo "::error::缺目录 $d"; exit 1; }
+            rm -rf "$IB/$d"
+            ln -sfn "${{ github.workspace }}/$d" "$IB/$d"
+          done
+
+          echo "==> IB 就绪：$(du -sh "$IB" | cut -f1)"
+
+      - name: Build ImmortalWrt x86-64 EFI 25.12.x
+        run: |
+          profile="${{ github.event.inputs['Profile'] }}"
+          case "$profile" in
+            8G盘*)   ROOTFS_SIZE=4096   ;;
+            16G盘*)  ROOTFS_SIZE=10240  ;;
+            # 下面四档按硬盘标称给值，rootfs 已扣掉「标称→GiB 的 0.9313 损耗」+ swap：
+            #   32G 盘 29.8GiB - 6G swap - 约 1.8G 余量 = 22G
+            #   64G 盘 59.6GiB - 8G swap - 约 1.6G 余量 = 50G
+            #   128G 盘 119.2GiB - 8G swap - 约 3.2G 余量 = 108G
+            #   256G 盘 238.4GiB - 8G swap - 约 6.4G 余量 = 224G
+            # 余量要留着：分区表 + EFI 分区 + 32M kernel + 不同牌子盘的实际容量差。
+            32G盘*)  ROOTFS_SIZE=22528  ;;
+            64G盘*)  ROOTFS_SIZE=51200  ;;
+            128G盘*) ROOTFS_SIZE=110592 ;;
+            256G盘*) ROOTFS_SIZE=229376 ;;
+            *)
+              echo "::error::未知 profile=$profile（可选 8G盘→4G / 16G盘→10G / 32G盘→22G / 64G盘→50G / 128G盘→108G / 256G盘→224G）"
+              exit 1
+              ;;
+          esac
+          echo "ROOTFS_SIZE=$ROOTFS_SIZE" >> $GITHUB_ENV
+          echo "Building for rootfs_size: $profile"
+          # 【honk 线】不再 docker run 官方镜像。IB 已由上一步解压到 $GITHUB_WORKSPACE/ib，
+          # .config / build.sh / files / shell / custom / rootfs-skel / tests 都已接好，
+          # /home/build/immortalwrt 是指向它的软链 —— 直接在本机跑 build.sh 即可。
+          # 注意 「Luci Version」下拉框在本线已不决定内核：内核来自 IB 包，换它只会换
+          # 工具链镜像，换不到 ftrace。留着输入只为将来切回官方镜像时不用改页面。
+          IB="${{ github.workspace }}/ib"
+          [ -x "$IB/build.sh" ] || { echo "::error::IB 未就绪：$IB/build.sh 不存在"; exit 1; }
+          cd "$IB"
+          # 不用 sudo：产物归 runner 用户，后面改名/上传都不需要再 chown。
+          PROFILE=$ROOTFS_SIZE bash "$IB/build.sh"
+
+
+      - name: Create Info
+        env:
+          IN_IP: ${{ github.event.inputs['Router IP'] }}
+        run: |
+          {
+            echo '- 🏠 **后台地址**: '"${IN_IP}"
+            echo '- 👤 **用户名**: root'
+            echo '- 🔑 **密码**: 无'
+            echo
+            echo '#### 默认带 docker（LXC + Docker 已内置）'
+            if [ "${{ env.CS_ENROLL }}" = "yes" ]; then
+              echo
+              echo '> ⚠️ **本固件内含 CrowdSec enrollment key**（明文：`/etc/config/crowdsec_enroll_key.txt`）'
+              echo '> 该 key 固定有效、可反复使用。公开分享本固件等于公开注册权限，用完请删除此 Release 资产。'
+            fi
+            echo
+            echo '#### CrowdSec 容器镜像'
+            CSV="$(sed -n 's/^version=//p' "${{ github.workspace }}/crowdsec-build.txt" 2>/dev/null | head -1)"
+            CSS="$(sed -n 's/^source=//p' "${{ github.workspace }}/crowdsec-build.txt" 2>/dev/null | head -1)"
+            echo "- crowdsec 版本: ${CSV:-未知}"
+            echo "- 镜像来源: ${CSS:-未知}"
+          } > "${{ github.workspace }}/router-info.md"
+
+      # 为什么要在上传前改名：
+      #   六个档位产出的文件名上游是固定的，都是
+      #     immortalwrt-<ver>-x86-64-generic-squashfs-combined-efi.img.gz
+      #   Release 的 tag 也是固定的 Autobuild-x86-64，softprops 遇到同名 asset 会直接覆盖。
+      #   结果就是「先做 8G，再做 16G」之后，8G 那份被 16G 那份吃掉。
+      #   这里按实际 rootfs 分区大小插一个后缀，六个档位各占一份，互不覆盖。
+      #   后缀取的是 rootfs 的真实 MB 值换算出的 G（4096/10240/22528/51200/110592/229376
+      #   都能整除 1024），所以文件名和分区实际大小是一一对应的，不存在名实不符。
+      - name: 产物文件名加档位后缀（避免不同档位互相覆盖）
+        run: |
+          set -e
+          cd "${{ github.workspace }}/bin/targets/x86/64"
+          MB="${ROOTFS_SIZE:?ROOTFS_SIZE 为空，无法判定档位}"
+          # 盘标称按 MB 写死映射，不解析下拉框文本，避免拿中文做 shell 模式匹配。
+          # 这是档位表的第四处硬编码：下拉框 / 白名单 / ROOTFS_SIZE 映射 / 这里，改档位时一起改。
+          case "$MB" in
+            4096)   DISK=8G   ;;
+            10240)  DISK=16G  ;;
+            22528)  DISK=32G  ;;
+            51200)  DISK=64G  ;;
+            110592) DISK=128G ;;
+            229376) DISK=256G ;;
+            *)      DISK=""   ;;
+          esac
+          if [ $(( MB % 1024 )) -eq 0 ]; then
+            RFS="$(( MB / 1024 ))G"
+          else
+            RFS="${MB}M"
+          fi
+          # 两个都带上：盘标称 + rootfs 实际大小，例如 disk8G-rootfs4G。
+          # 文件名因此同时说明「装哪块盘」和「分区多大」，不会出现 8G 的名字配 4G 的分区这种歧义。
+          if [ -n "$DISK" ]; then
+            SUF="disk${DISK}-rootfs${RFS}"
+          else
+            SUF="rootfs${RFS}"
+          fi
+          echo "==> rootfs=${MB}MB，盘标称=${DISK:-未知}，文件名后缀 -${SUF}"
+          n=0
+          for f in *-combined-efi.img.gz *-rootfs.tar.gz; do
+            [ -f "$f" ] || continue
+            case "$f" in
+              *.img.gz) new="${f%.img.gz}-${SUF}.img.gz" ;;
+              *.tar.gz) new="${f%.tar.gz}-${SUF}.tar.gz" ;;
+              *) continue ;;
+            esac
+            # 产物是 docker run --user root 在容器内创建的，bin/targets/x86/64
+            # 目录属主也是 root，runner 用户对该目录没有写权限。
+            # 同目录内改名只要求目录可写，这里目录不可写，直接 mv 会 Permission denied，
+            # 所以必须借 sudo（hosted runner 的 sudo 免密）。
+            # 文件属主仍为 root，但权限 644，后面的 Upload 以 runner 身份读取不受影响。
+            sudo mv -f "$f" "$new"
+            echo "  $f"
+            echo "    -> $new"
+            n=$((n + 1))
+          done
+          if [ "$n" -eq 0 ]; then
+            echo "::error::没找到待改名的产物，bin/targets/x86/64 当前内容："
+            ls -l
+            exit 1
+          fi
+          echo "==> 共改名 $n 个文件"
+
+      - name: Upload ImmortalWrt Release Assets
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: Autobuild-x86-64
+          body_path: ${{ github.workspace }}/router-info.md
+          files: |
+            ${{ github.workspace }}/bin/targets/x86/64/*-combined-efi*.img.gz
+          token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
