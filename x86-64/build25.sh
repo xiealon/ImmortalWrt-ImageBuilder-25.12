@@ -1067,19 +1067,28 @@ if [ -n "$_AK_BIN" ] && [ -n "$_AK_IDX" ] && [ -d "$_IB_PKGS" ]; then
         echo "::error::IB 索引只有 $_ib_sz 字节，是空索引（$((_ib_n + _ib_o)) 个包一个都没进去）"
         exit 1
     fi
-    # kmod 一个都不能少：少了就是 make image 装内核模块时缺包，且错在装机阶段才暴露
-    if [ "$_ib_k" -lt 1100 ]; then
-        echo "::error::official/ 里只有 $_ib_k 个 kmod（预期 1199），内核模块库不完整"
-        exit 1
-    fi
-    # 索引收录数必须对得上：少了就是链接没建成，make image 会在装机阶段才炸
     _ib_in=$(echo $_ib_list | wc -w)
     echo "==> [ib-pkgs] 索引收录 $_ib_in 个包（run $_ib_n + official $_ib_o）"
-    if [ "$_ib_in" -lt 1300 ]; then
-        echo "::error::索引只收了 $_ib_in 个包（预期 1380 左右），符号链接或索引生成有问题"
-        exit 1
-    fi
-    echo "==> [ib-pkgs] kmod $_ib_k 个已入索引"
+
+    # 【2026-11-09】kmod 完整性断言只对「带自建内核模块库」的线成立。
+    # 25.12-honk / 25.12-daed 把自建 pkg 包的 1,204 个 kmod 灌进 official/，
+    # 少于 1,100 就是内核模块库不完整，必须炸。
+    # 本线（官方源）用官方 ImageBuilder，官方 kmod 在 IB 自带的 packages/ 里，
+    # official/ 只是第三方 apk 的下载目录（clashoo / daed / passwall 这些），
+    # kmod 数天然是 0 —— 拿 1199 去卡会无条件失败（run #1 就是这么挂的）。
+    if [ "$_ib_k" -gt 0 ]; then
+        if [ "$_ib_k" -lt 1100 ]; then
+            echo "::error::official/ 里只有 $_ib_k 个 kmod（预期 1199），内核模块库不完整"
+            exit 1
+        fi
+        if [ "$_ib_in" -lt 1300 ]; then
+            echo "::error::索引只收了 $_ib_in 个包（预期 1380 左右），符号链接或索引生成有问题"
+            exit 1
+        fi
+        echo "==> [ib-pkgs] kmod $_ib_k 个已入索引"
+    else
+        echo "==> [ib-pkgs] 本线无自建 kmod 库（官方 IB 自带），跳过 kmod 完整性断言"
+    fi"
 else
     echo "::warning::[ib-pkgs] 跳过：apk 工具不可用或 packages/ 不存在"
 fi
