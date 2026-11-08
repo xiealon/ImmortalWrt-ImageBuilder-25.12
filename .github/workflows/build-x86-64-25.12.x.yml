@@ -3,10 +3,10 @@ name: Build 25.12.x x86-64 (official source)
 on:
   workflow_dispatch:
     inputs:
-      # 【honk 线】只剩 25.12.2 一档。这一项在本线已经不参与编译 ——
-      # 内核和工具链都来自自建 IB 包（v25.12.2-ib-x86-64），跟这个下拉框无关。
-      # 不删是因为 workflow_dispatch 少一项容易让人以为「还能切回 25.12.1」，
-      # 留一个不可切换的 25.12.2 反而是最清楚的说明。
+      # 【官方源线】这三档直接决定官方 ImageBuilder 镜像 tag：
+      #   immortalwrt/imagebuilder:x86-64-openwrt-25.12.0 / 25.12.1 / 25.12.2
+      # 内核和工具链都跟着镜像走，不是本仓编译的 —— 选哪档就出哪档的镜像。
+      # （要能跑 honk 得用带 DYNAMIC_FTRACE + BTF 的自建内核，见 25.12-honk 仓。）
       Luci Version:
         description: "选择 luci 版本（决定官方 ImageBuilder 镜像 tag）"
         required: false
