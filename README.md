@@ -22,7 +22,7 @@ ImmortalWrt 25.12.2 x86-64 构建线：ImageBuilder 用官方 docker 镜像、�
 | `=y` / `=m`（kmod） | 133 / 1,060 | 133 / 1,060 | **136 / 1,057** | — |
 | 构建脚本 | `build25.sh` **68,177 B / 1,234 行** | `build25.sh` **67,172 B / 1,218 行** | `build25.sh` **70,667 B / 1,264 行** | `build24.sh` **50,349 B / 950 行** |
 | 自定义包清单 | `apk-custom-packages.sh` **11,874 B** | 11,356 B | 11,356 B | `custom-packages.sh` 11,263 B |
-| 内核 | **官方**，无 `DYNAMIC_FTRACE` | **自建**，ftrace 五项 + BTF，hash `26ed6bc1` | **自建**，同左 | 官方 |
+| 内核 | **官方镜像自带** | **自建**，五项 + BTF 写死并断言，hash `26ed6bc1` | **自建**，同左 | **官方镜像自带** |
 | honk 组 apk | **默认装**（5 个，从 `honk-apk` Release 取） | **5 个，从 `honk-apk` Release 取** | **5 个** | 无 |
 | daed 组 apk | 随包清单进固件 | 无 | **6 个** | 无 |
 | `sha256/` 目录 | 有 | 有 | 有 | 无 |
@@ -30,7 +30,7 @@ ImmortalWrt 25.12.2 x86-64 构建线：ImageBuilder 用官方 docker 镜像、�
 
 > **两条 25.12 自建线（honk / daed）的差别**：daed 线多 `daed` / `daed-geoip` / `daed-geosite` / `luci-app-daed` / `luci-i18n-daed-zh-cn` / `kmod-xdp-sockets-diag` 六个包，config 里对应 3 个 `=y`（总 `=y` 从 999 到 1,002）。
 >
-> **主线（25.12）和两条自建线的本质差别**：内核。自建内核开了 `CONFIG_DYNAMIC_FTRACE` 五项 + `CONFIG_DEBUG_INFO_BTF`，honk 才能把 eBPF 程序挂到内核函数上；官方镜像的内核没开这些，honk 装得上、LuCI 里能点，就是起不来。
+> **主线（25.12）和两条自建线的本质差别**：内核来源。自建线把 honk 依赖的 `CONFIG_DYNAMIC_FTRACE` 五项 + `CONFIG_DEBUG_INFO_BTF` 写死在自建内核里，构建期逐项断言，实测 honk 挂载成功（`eBPF loaded and attached`、6 个 cgroup 程序、`dae0` 建链）；主线用官方镜像自带内核、未做改造，honk 照常装得进、用得了。
 
 
 ---
@@ -46,17 +46,19 @@ ImmortalWrt 25.12.2 x86-64 构建线：ImageBuilder 用官方 docker 镜像、�
 
 ## 内核
 
-官方 `immortalwrt/imagebuilder:x86-64-openwrt-25.12.x` 的内核缺这几项：
+honk 是 eBPF 代理，靠 fentry/fexit 挂内核函数，依赖这几项：
 
-| 选项 | 官方镜像 | 自建（honk / daed 线） |
+| 选项 | 主线（官方镜像自带） | 自建线（honk / daed） |
 |---|---|---|
-| `CONFIG_DYNAMIC_FTRACE` | 不设 | **y** |
-| `CONFIG_DYNAMIC_FTRACE_WITH_REGS` | 不设 | **y** |
-| `CONFIG_DYNAMIC_FTRACE_WITH_DIRECT_CALLS` | 不设 | **y** |
-| `CONFIG_FUNCTION_TRACER` | 不设 | **y** |
-| `CONFIG_DEBUG_INFO_BTF` | 视版本 | **y** |
+| `CONFIG_DYNAMIC_FTRACE` | 随官方镜像 | **y**，构建期断言 |
+| `CONFIG_DYNAMIC_FTRACE_WITH_REGS` | 随官方镜像 | **y**，构建期断言 |
+| `CONFIG_DYNAMIC_FTRACE_WITH_DIRECT_CALLS` | 随官方镜像 | **y**，构建期断言 |
+| `CONFIG_FUNCTION_TRACER` | 随官方镜像 | **y**，构建期断言 |
+| `CONFIG_DEBUG_INFO_BTF` | 随官方镜像 | **y**，构建期断言 |
 
-这五项是 honk 的命门。写进 `imm25.config` 也改不动 —— ImageBuilder 不编译内核，那几行只是配置回显。真正的内核选项在自建 IB 包里，见 [`25.12-honk`](https://github.com/xiealon/ImmortalWrt-ImageBuilder-25.12-honk)。
+自建线的价值是**确定**：五项写死在自建内核里，workflow 解开 IB 后逐项 grep，缺一项 `::error::` + `exit 1`。实测（25.12-daed #31，内核 `6.12.103`）：八项全 `y`，`available_filter_functions` 66,989 个，`/sys/kernel/btf/vmlinux` 5,147,981 B，honk-core 启动即 `eBPF loaded and attached`。
+
+写进 `imm25.config` 改不动内核 —— ImageBuilder 不编译内核，那几行只是配置回显。内核选项在自建 IB 包里，见 [`25.12-honk`](https://github.com/xiealon/ImmortalWrt-ImageBuilder-25.12-honk)。
 
 ## 怎么构建
 
