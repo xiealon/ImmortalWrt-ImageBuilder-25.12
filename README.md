@@ -26,6 +26,7 @@ ImmortalWrt 25.12.2 x86-64 构建线：ImageBuilder 用官方 docker 镜像、�
 | honk 组 apk | **默认装**（5 个，从 `honk-apk` Release 取） | **5 个，从 `honk-apk` Release 取** | **5 个** | 无 |
 | daed 组 apk | 随包清单进固件 | 无 | **6 个** | 无 |
 | `sha256/` 目录 | 有 | 有 | 有 | 无 |
+| 恢复探针 | `_pa_repair` 缺包走 `--tree`、缺文件走 `--force` | 同左 | 同左 | **同左**（2026-11-09 对齐） |
 | CrowdSec LXC / rootfs-skel / 网络校验 | 有 | 有 | 有 | 有 |
 
 > **两条 25.12 自建线（honk / daed）的差别**：daed 线多 `daed` / `daed-geoip` / `daed-geosite` / `luci-app-daed` / `luci-i18n-daed-zh-cn` / `kmod-xdp-sockets-diag` 六个包，config 里对应 3 个 `=y`（总 `=y` 从 999 到 1,002）。
