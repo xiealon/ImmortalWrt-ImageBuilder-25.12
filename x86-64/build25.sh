@@ -599,6 +599,8 @@ crowdsec-firewall-bouncer luci-app-crowdsec-firewall-bouncer
 luci-i18n-crowdsec-firewall-bouncer-zh-cn nftables-json
 v2ray-geoip v2ray-geosite sing-box
 adblock luci-app-adblock luci-i18n-adblock-zh-cn
+geoview rtp2httpd luci-app-rtp2httpd luci-i18n-rtp2httpd-zh-cn
+luci-theme-argon luci-app-argon-config luci-i18n-argon-config-zh-cn
 luci-app-daed luci-i18n-daed-zh-cn"
 
 # 来源 A：packages/ 里 run 包解出的 apk（第三方包，官方源没有）
