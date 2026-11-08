@@ -1088,7 +1088,7 @@ if [ -n "$_AK_BIN" ] && [ -n "$_AK_IDX" ] && [ -d "$_IB_PKGS" ]; then
         echo "==> [ib-pkgs] kmod $_ib_k 个已入索引"
     else
         echo "==> [ib-pkgs] 本线无自建 kmod 库（官方 IB 自带），跳过 kmod 完整性断言"
-    fi"
+    fi
 else
     echo "::warning::[ib-pkgs] 跳过：apk 工具不可用或 packages/ 不存在"
 fi
