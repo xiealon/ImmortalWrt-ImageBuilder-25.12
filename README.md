@@ -23,7 +23,7 @@ ImmortalWrt 25.12.2 x86-64 构建线：ImageBuilder 用官方 docker 镜像、�
 | 构建脚本 | `build25.sh` **68,177 B / 1,234 行** | `build25.sh` **67,172 B / 1,218 行** | `build25.sh` **70,667 B / 1,264 行** | `build24.sh` **50,349 B / 950 行** |
 | 自定义包清单 | `apk-custom-packages.sh` **11,874 B** | 11,356 B | 11,356 B | `custom-packages.sh` 11,263 B |
 | 内核 | **官方镜像自带** | **自建**，五项 + BTF 写死并断言，hash `26ed6bc1` | **自建**，同左 | **官方镜像自带** |
-| honk 组 apk | **默认装，能装能用**（5 个，走 `honk-apk` Release） | **默认装，能装能用**（5 个） | **默认装，能装能用**（5 个） | 无 |
+| honk 组 apk | **默认装**（5 个，从 `honk-apk` Release 取） | **5 个，从 `honk-apk` Release 取** | **5 个** | 无 |
 | daed 组 apk | 随包清单进固件 | 无 | **6 个** | 无 |
 | `sha256/` 目录 | 有 | 有 | 有 | 无 |
 | CrowdSec LXC / rootfs-skel / 网络校验 | 有 | 有 | 有 | 有 |
