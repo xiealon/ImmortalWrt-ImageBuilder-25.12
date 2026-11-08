@@ -4,7 +4,9 @@
 
 固件本体是 ImmortalWrt 25.12.2 x86-64，带 CrowdSec LXC、`rootfs-skel`、网络校验脚本 —— 和另外三条线完全相同的应用层，差别只在**内核和 apk 来源**。
 
-> **honk 在这条线上装得上、起不来**。官方镜像的内核没开 `CONFIG_DYNAMIC_FTRACE*`，而 honk 是 eBPF 代理，靠 fentry/fexit 挂内核函数。要能跑的 honk 请用 [`25.12-honk`](https://github.com/xiealon/ImmortalWrt-ImageBuilder-25.12-honk)。
+> **honk 在这条线上装得上、起不来。**
+> **装得上**：`shell/apk-custom-packages.sh` 里那行注释放开就行 —— 构建会把 `honk-apk` Release 的 5 个 apk 塞进 `packages/`，当本地包正常装进固件，LuCI 里也能点开。
+> **起不来**：官方镜像的内核没开 `CONFIG_DYNAMIC_FTRACE*`，而 honk 是 eBPF 代理，靠 fentry/fexit 挂内核函数。要能跑的 honk 请用 [`25.12-honk`](https://github.com/xiealon/ImmortalWrt-ImageBuilder-25.12-honk)。
 > `daed` 不受影响，随包清单正常进固件。
 
 ## 四条线的差异
@@ -12,7 +14,7 @@
 | | 25.12 | 25.12-honk | 25.12-daed | 24.10 |
 |---|---|---|---|---|
 | 用途 | **主线，全官方源** | **纯 honk** | **honk + daed** | 老版本线，维护用 |
-| workflow | 28,504 B / 496 行 | 37,645 B / 644 行 | 37,419 B / 641 行 | 27,853 B / 494 行 |
+| workflow | 28,506 B / 496 行 | 37,645 B / 644 行 | 37,419 B / 641 行 | 27,853 B / 494 行 |
 | `runs-on` | ubuntu-22.04 | **ubuntu-24.04** | **ubuntu-24.04** | ubuntu-22.04 |
 | ImageBuilder | 官方 docker `x86-64-openwrt-25.12.0/1/2` | **自建 IB**，`v25.12.2-ib-x86-64-r2` | **自建 IB**，同左 | 官方 docker `24.10.0 ~ 24.10.6` |
 | apk 来源 | 官方源 | **自建 pkg**，`v25.12.2-pkg-x86-64-r2` | **自建 pkg**，同左 | 官方源 |
@@ -20,10 +22,10 @@
 | 主 config | `imm25.config` 303,823 B / 8,272 行 | 同左 | 同左 | `imm.config` 284,106 B / 7,705 行 |
 | `=y` / `=m`（全部） | 999 / 1,227 | 999 / 1,227 | **1,002 / 1,224** | 952 / 1,005 |
 | `=y` / `=m`（kmod） | 133 / 1,060 | 133 / 1,060 | **136 / 1,057** | — |
-| 构建脚本 | `build25.sh` 63,180 B / 1,146 行 | 同左 | `build25.sh` 66,675 B / 1,192 行 | `build24.sh` 47,780 B / 906 行 |
-| 自定义包清单 | `apk-custom-packages.sh` **11,346 B** | 11,356 B | 11,356 B | `custom-packages.sh` 11,263 B |
+| 构建脚本 | `build25.sh` **68,177 B / 1,234 行** | `build25.sh` **67,172 B / 1,218 行** | `build25.sh` **70,667 B / 1,264 行** | `build24.sh` **50,349 B / 950 行** |
+| 自定义包清单 | `apk-custom-packages.sh` **12,089 B** | 11,356 B | 11,356 B | `custom-packages.sh` 11,263 B |
 | 内核 | **官方**，无 `DYNAMIC_FTRACE` | **自建**，ftrace 五项 + BTF，hash `26ed6bc1` | **自建**，同左 | 官方 |
-| honk 组 apk | **默认关闭**（注释可开，装上起不来） | **5 个，从 `honk-apk` Release 取** | **5 个** | 无 |
+| honk 组 apk | **默认不装**（放开那行注释即装进固件：能装、能进 LuCI，起不来） | **5 个，从 `honk-apk` Release 取** | **5 个** | 无 |
 | daed 组 apk | 随包清单进固件 | 无 | **6 个** | 无 |
 | `sha256/` 目录 | 有 | 有 | 有 | 无 |
 | CrowdSec LXC / rootfs-skel / 网络校验 | 有 | 有 | 有 | 有 |
