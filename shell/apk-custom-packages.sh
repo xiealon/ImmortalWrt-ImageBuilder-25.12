@@ -140,8 +140,18 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES xz tar ip-full"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES kmod-veth kmod-ikconfig"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES kmod-br-netfilter"
 # acpi_call: manual EC fan-step control for Panasonic CFSV7-3 (added 2026-11-05).
-# apk already ships in packages tar (kmod-acpi-call-6.12.103.1.0-r1.apk); list it here only.
-CUSTOM_PACKAGES="$CUSTOM_PACKAGES kmod-acpi-call"
-CUSTOM_PACKAGES="$CUSTOM_PACKAGES kmod-hwmon-pwmfan kmod-gpio-pwm"
+# 【2026-11-09】kmod-acpi-call / kmod-hwmon-pwmfan / kmod-gpio-pwm 主线不再收。
+# 实测（2026-11-09，官方源 25.12.2 x86-64）：
+#   targets/x86/64/kmods/6.12.103-1-0413601b1c3f0490e17f340fe09229ea/ 共 1,199 个 kmod，
+#   这三个一个都没有 —— 名字里带 pwm 的 0 个，带 acpi-call 的 0 个。
+#   run 包（packages/*.apk，69 个）里也没带。
+#   于是 make image 在 package_install 阶段直接退出：
+#     kmod-acpi-call (no such package)
+#     kmod-hwmon-pwmfan (no such package)
+#   原来那句注释「apk already ships in packages tar」是错的：那是 25.12-honk 线
+#   自建内核才编的模块，主线用官方 ImageBuilder，内核模块只能来自官方 kmods 库。
+# 需要这三个（PWM 风扇 / acpi_call）只能切 25.12-honk 或 25.12-daed 线自建内核。
+# CUSTOM_PACKAGES="$CUSTOM_PACKAGES kmod-acpi-call"
+# CUSTOM_PACKAGES="$CUSTOM_PACKAGES kmod-hwmon-pwmfan kmod-gpio-pwm"
 
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES glib2 crconf davici swanmon kmod-crypto-chacha20poly1305"
