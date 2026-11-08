@@ -11,14 +11,12 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-rtp2httpd luci-i18n-rtp2httpd-zh-cn"
 #   穿透   → tailscale + cloudflared + nps（留这三个，见下方 zerotier/xfrpc/eoip/ngrokc 各处说明）
 # 当日 201 实测：/etc/lucky 目录 0 个文件、option enabled '0' —— 装了从未配置，
 # 留着只是多一个从没验证过的黑盒。cp /etc/config/lucky 里 configdir 指向它。
-# honk（eBPF 代理，硬要求内核 6.12+ 且开 DYNAMIC_FTRACE + BTF）在本线默认关闭，
-# 因为官方镜像的内核不带那几项。详见下方注释。
-# 【主线仓】默认不装 honk：官方 ImageBuilder 的内核没有 CONFIG_DYNAMIC_FTRACE /
-# CONFIG_DEBUG_INFO_BTF，honk 是 eBPF 代理，靠 fentry/fexit 挂内核函数，装上也是
-# honk-core 起不来。要能跑起来的 honk 请用 25.12-honk 仓（自建内核）。
-# 想在本线试装：取消下面这行注释 —— 包会从 CloudRunFilesBuilder 的 honk-apk
-# Release 取到 packages/，走本地包不走 apk 源；能装、能进 LuCI，就是起不来。
-#CUSTOM_PACKAGES="$CUSTOM_PACKAGES honk luci-app-honk luci-lib-daeuniverse luci-i18n-daeuniverse-zh-cn vmlinux-btf-builtin"
+# honk（eBPF 代理）：默认装，不再保留「默认关闭 + 放开注释才装」的开关。
+# 用户 2026-11-09 定：IB 走本仓这套就能装、能用 —— build25.sh 本来就有
+# honk-apk Release 下载段（取 5 个 apk 放进 packages/，当本地包装进固件），
+# 也有 _ak_need_honk 构建期断言，只要 PACKAGES 里含 honk 就自动启用。
+# 所以这里直接列进清单，不再靠注释切换。
+CUSTOM_PACKAGES="$CUSTOM_PACKAGES honk luci-app-honk luci-lib-daeuniverse luci-i18n-daeuniverse-zh-cn vmlinux-btf-builtin"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES geoview sing-box luci-compat kmod-tun kmod-inet-diag kmod-nft-tproxy kmod-nft-socket bash curl lua unzip"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES clashoo luci-app-clashoo luci-i18n-clashoo-zh-cn"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES yq kmod-dummy ca-bundle"
