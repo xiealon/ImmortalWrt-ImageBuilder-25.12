@@ -646,7 +646,10 @@ _kmods_watch() {
     P_KMOD_BAD=0
     P_ACTION="kmods-repair"
     plog "【依赖文件】连续 $PROBE_STALL_ROUNDS 轮缺失，开始补回：$_kd_out"
-    sh "$_KMODS_RESTORE" --deps --repair >>"$BOOT_LOG" 2>&1
+    # 【2026-11-10.0505】加 _cap 兜底：--deps --repair 内部是 apk/opkg 整包安装，
+    # 固件没有 timeout 时裸跑可能卡死整个探针主循环（本通道挂在主循环里，卡住=全停）。
+    # 180s 与 rc.local 第 172 行的 _run_capped 180 同口径。
+    _cap 180 sh "$_KMODS_RESTORE" --deps --repair >>"$BOOT_LOG" 2>&1
     # 修完必须再问一次 --check，不能凭 --repair 的返回值下结论。
     if _kd_out2="$(sh "$_KMODS_RESTORE" --deps --check 2>&1)"; then
         P_KMOD_BAD=0
@@ -1121,6 +1124,16 @@ while true; do
     P_LOCK_RECLAIMED=0
     _guard_run
     probe_tick
+    # 【2026-11-10.0505】依赖文件通道挂回主循环。
+    # 此前 _kmods_watch 只有定义、没有任何调用点（rc.local 第 169-172 行开机调一次），
+    # 结果是：开机后文件被删 → 本通道全程无感 → P_KMOD_BAD 恒为 0 →
+    # 下面 1148 行那条「P_KMOD_BAD 进 60s 加速」分支是死代码。
+    # 挂主循环而不挂 probe_tick 内部：probe_tick 在 lock-busy / wait-install 时
+    # 提前 return，而依赖文件检查不依赖引导锁，那些轮次也该照查。
+    # 顺序必须在 probe_tick 之后：probe_tick 会覆盖 P_ACTION，
+    # 本通道的 kmods-* 标签要最后落盘才看得见。
+    # 代价：每轮多一次 --deps --check（只读包内清单 + [ -e ]，实测约 6 ms）。
+    _kmods_watch
     _probe_save
     # 【2026-11-09 用户定】包缓存体检也归到「每次开机只跑一次」，与应用包同频。
     if [ ! -f /tmp/.cs-pkgcache-once ]; then
