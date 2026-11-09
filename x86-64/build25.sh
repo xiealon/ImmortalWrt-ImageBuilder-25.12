@@ -266,7 +266,6 @@ if echo "$PACKAGES" | grep -q "honk"; then
     fi
     _hk_n=0
     for _hk_pkg in honk luci-app-honk luci-lib-daeuniverse luci-i18n-daeuniverse-zh-cn vmlinux-btf-builtin; do
-        _hk_url=$(printf '%s' "$_hk_json" \
         # 〔2026-11-09】取版本号最大的，不取第一个匹配。
         # 起因：honk-apk Release 升到 beta6 时，旧的 beta4 资产没被删掉，
         # assets 列表里 beta4 排在前面，head -n1 会挑到旧版 —— 构建出来还是旧固件。
