@@ -138,7 +138,27 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Set Executable Permissions
-        run: chmod +x ${{ github.workspace }}/x86-64/build25.sh
+        run: |
+          # 只 chmod 构建脚本远远不够：files/ 下的脚本会被 ImageBuilder 原样拷进固件，
+          # 它们在 git 里必须带执行位。最要命的是 /etc/rc.local —— OpenWrt 的
+          # /etc/init.d/done 判的是 [ -x /etc/rc.local ]，没有 x 位整段 rc.local 被跳过，
+          # 于是 bootstrap 从不运行、Router IP 不生效、guard / smartdns / 应用包恢复
+          # 也全被 -x 判据挡掉，表现为「开机什么都没做」。
+          # 2026-11-09 就是这么踩的：files/etc/rc.local 在四个仓库里都是 100644。
+          # git 侧的 mode 已修（提交 fix(perm)），这里再全量兜一刀，
+          # 以后谁用 API 推文件把 mode 打成 644 也不会漏进固件。
+          chmod +x "${{ github.workspace }}/x86-64/build25.sh"
+          for _d in files shell tests; do
+            [ -d "${{ github.workspace }}/$_d" ] || continue
+            find "${{ github.workspace }}/$_d" -type f \
+                 \( -name '*.sh' -o -name 'rc.local' \) -exec chmod +x {} + 2>/dev/null || true
+          done
+          echo "==> 可执行位复核（rc.local 必须 -rwxr-xr-x）"
+          ls -l "${{ github.workspace }}/files/etc/rc.local" \
+                "${{ github.workspace }}/files/usr/sbin/crowdsec-lxc-bootstrap.sh" \
+                "${{ github.workspace }}/x86-64/build25.sh"
+          [ -x "${{ github.workspace }}/files/etc/rc.local" ] \
+            || { echo "::error::files/etc/rc.local 仍无执行位，开机不会跑任何引导"; exit 1; }
 
       # 先把 runner 自带、本构建完全用不到的工具链删掉。
       # 实测 GitHub 托管 runner 是 146G 盘（不是文档里说的 14G），清完剩 109G 可用，
