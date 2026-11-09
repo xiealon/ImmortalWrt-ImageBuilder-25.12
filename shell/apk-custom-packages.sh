@@ -11,12 +11,18 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-rtp2httpd luci-i18n-rtp2httpd-zh-cn"
 #   穿透   → tailscale + cloudflared + nps（留这三个，见下方 zerotier/xfrpc/eoip/ngrokc 各处说明）
 # 当日 201 实测：/etc/lucky 目录 0 个文件、option enabled '0' —— 装了从未配置，
 # 留着只是多一个从没验证过的黑盒。cp /etc/config/lucky 里 configdir 指向它。
-# honk（eBPF 代理）：默认装，不再保留「默认关闭 + 放开注释才装」的开关。
-# 用户 2026-11-09 定：IB 走本仓这套就能装、能用 —— build25.sh 本来就有
-# honk-apk Release 下载段（取 5 个 apk 放进 packages/，当本地包装进固件），
-# 也有 _ak_need_honk 构建期断言，只要 PACKAGES 里含 honk 就自动启用。
-# 所以这里直接列进清单，不再靠注释切换。
-CUSTOM_PACKAGES="$CUSTOM_PACKAGES honk luci-app-honk luci-lib-daeuniverse luci-i18n-daeuniverse-zh-cn vmlinux-btf-builtin"
+# daed（eBPF 代理）：官方线装 daed，不装 honk。
+# 【2026-11-10】用户定：官方 25.12 线去掉 honk、改用新版 daed。
+# 包来自 kenzok8/openwrt-daede 的 Release（build25.sh 的 daed 段取 3 个 apk 放进
+# packages/，当本地包装进固件），版本随 Release tag 走，不在 apk 源里：
+#   daed-2026.11.09-r1-x86_64.apk            25,992,538 B  主程序，内嵌 Web UI
+#   luci-app-daede-1.15-r13-x86_64.apk           99,180 B  LuCI 界面（PKGARCH:=all）
+#   vmlinux-btf-6.12.103-r1-x86_64.apk        1,676,424 B  BTF 包，与 25.12 内核同版
+# vmlinux-btf 必须显式列出：daed 的 Makefile 里有 +DAED_USE_VMLINUX_BTF:vmlinux-btf
+# 这条依赖，缺包在 make image 阶段直接报找不到；而且探针要从 /rom/root/apk-cache
+# 把它装回来 —— 不进包库就是空头支票。版本必须等于目标内核版本，否则 daed 的
+# CO-RE eBPF 校验过不去（历史上 6.12.79 那份就是这么被排除掉的）。
+CUSTOM_PACKAGES="$CUSTOM_PACKAGES daed luci-app-daede vmlinux-btf"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES geoview sing-box luci-compat kmod-tun kmod-inet-diag kmod-nft-tproxy kmod-nft-socket bash curl lua unzip"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES clashoo luci-app-clashoo luci-i18n-clashoo-zh-cn"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES yq kmod-dummy ca-bundle"
