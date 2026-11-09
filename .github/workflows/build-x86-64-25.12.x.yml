@@ -6,7 +6,7 @@ on:
       # 【官方源线】这三档直接决定官方 ImageBuilder 镜像 tag：
       #   immortalwrt/imagebuilder:x86-64-openwrt-25.12.0 / 25.12.1 / 25.12.2
       # 内核和工具链都跟着镜像走，不是本仓编译的 —— 选哪档就出哪档的镜像。
-      # 代价是内核的 DYNAMIC_FTRACE 那组随上游走；BTF 由 vmlinux-btf 包补。
+      # （eBPF 代理要 DYNAMIC_FTRACE + BTF：自建线用自建内核，见 25.12-honk 仓；
       #   本线靠随包的 vmlinux-btf 补 BTF，DYNAMIC_FTRACE 随官方镜像走、不做断言。）
       Luci Version:
         description: "选择 luci 版本（决定官方 ImageBuilder 镜像 tag）"
@@ -386,7 +386,7 @@ jobs:
           echo "Building for rootfs_size: $profile"
           luci_version="${{ github.event.inputs['Luci Version'] }}"
           # 走官方 ImageBuilder 镜像：内核、工具链、apk 源全部官方，不掺自建产物。
-          # 代价是内核没有 DYNAMIC_FTRACE / BTF —— honk 装得上但起不来。
+          # 代价是内核的 DYNAMIC_FTRACE 那组随上游走；BTF 由 vmlinux-btf 包补。
           echo "==> ImageBuilder 镜像：immortalwrt/imagebuilder:x86-64-openwrt-${luci_version}"
           docker run --rm -i \
             --user root \
