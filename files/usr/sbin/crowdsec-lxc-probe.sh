@@ -57,6 +57,10 @@ PROBE_STALL_ROUNDS="${CS_PROBE_STALL_ROUNDS:-2}"
 # last_pull 单独保留 3 轮：它触发的是完整 bootstrap（重建容器 / 重建网络，
 # 真机出现过 veth 被甩掉），误判代价太大，必须比其他通道更保守。
 PROBE_STALL_ROUNDS_PULL="${CS_PROBE_STALL_ROUNDS_PULL:-3}"
+# 【2026-11-09 用户定】有通道进入「待确认」（计数 >0 且未达阈值）时，
+# 下一轮不等 PROBE_INTERVAL，改成隔这么多秒再判一次。60s 足够排除瞬时抖动，
+# 又不用让 DNS / lxc 中断硬等 10 分钟。
+PROBE_RECHECK_GAP="${CS_PROBE_RECHECK_GAP:-60}"
 PROBE_COOLDOWN="${CS_PROBE_COOLDOWN:-600}"
 PROBE_LOCK_STALE="${CS_PROBE_LOCK_STALE:-1800}"
 # 【2026-10-29 用户定】连续修复失败 3 次就锁存 need-human，原来是 5。
@@ -1127,5 +1131,14 @@ while true; do
         _pkgcache_probe
         : > /tmp/.cs-pkgcache-once
     fi
-    sleep "$PROBE_INTERVAL"
+    # 【2026-11-09 用户定】动态下一轮间隔：
+    #   有 DNS / lxc 通道处于「待确认」（BAD>0，尚未达 PROBE_STALL_ROUNDS）→ 60s 后复判；
+    #   复判仍异常则计数达阈值直接修，恢复正常则清零回到 600s。
+    #   这样轮数机制不变（仍是 2 次确认），但确认间隔从 10 分钟压到 60 秒。
+    #   last_pull 不进这个名单：它的修复是完整 bootstrap，宁可慢也不能被 60s 节奏推快。
+    _sleep_s="$PROBE_INTERVAL"
+    if [ "${P_UP_BAD:-0}" -gt 0 ] || [ "${P_LXC_BAD:-0}" -gt 0 ]; then
+        _sleep_s="$PROBE_RECHECK_GAP"
+    fi
+    sleep "$_sleep_s"
 done
