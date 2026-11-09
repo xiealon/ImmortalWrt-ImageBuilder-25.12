@@ -847,6 +847,7 @@ probe_tick() {
         fi
         P_STALL=0
         P_FAIL=0
+        P_PULL_POST=0
         # 【v.108.58】last_pull 自己恢复了 = 根因已消失，停手锁存必须一起解除。
         # 原来只清 P_STALL/P_FAIL，P_HUMAN 留着 → 下次真停滞时直接「停手」，
         # 等于自动修复被永久关掉，而日志里只写「需人工介入」不写「因为你上次没修好」。
@@ -879,6 +880,7 @@ probe_tick() {
     fi
     P_LAST_TRIG="$_now"
     P_STALL=0
+    P_PULL_POST=1
     P_ACTION="trigger"
     plog "【触发】last_pull 连续停滞 $PROBE_STALL_ROUNDS_PULL 轮，持锁重跑 $BOOT 复验/修复"
     _run_fix
@@ -1098,6 +1100,7 @@ _probe_load() {
 
 # ---- 主循环：等安装 → 每 PROBE_INTERVAL 一轮 ----
 P_STALL=0
+P_PULL_POST=0
 P_LAST_TRIG=0
 P_FAIL=0
 P_LOCK_RECLAIMED=0
@@ -1139,9 +1142,13 @@ while true; do
     #   有 DNS / lxc 通道处于「待确认」（BAD>0，尚未达 PROBE_STALL_ROUNDS）→ 60s 后复判；
     #   复判仍异常则计数达阈值直接修，恢复正常则清零回到 600s。
     #   这样轮数机制不变（仍是 2 次确认），但确认间隔从 10 分钟压到 60 秒。
-    #   last_pull 不进这个名单：它的修复是完整 bootstrap，宁可慢也不能被 60s 节奏推快。
+    #   last_pull 同属「待确认」：判定次数仍是 PROBE_STALL_ROUNDS_PULL 次，
+    #   只是把三次确认的间隔从 600s 压到 60s —— 判定次数一样、诊断力一样，
+    #   差别只是 30 分钟还是 2 分钟给出结论。
+    #   P_PULL_POST：刚跑完一轮 bootstrap，下一轮强制 60s 复判；正常即清标记回 600s。
     _sleep_s="$PROBE_INTERVAL"
-    if [ "${P_UP_BAD:-0}" -gt 0 ] || [ "${P_LXC_BAD:-0}" -gt 0 ]; then
+    if [ "${P_UP_BAD:-0}" -gt 0 ] || [ "${P_LXC_BAD:-0}" -gt 0 ] \
+       || [ "${P_STALL:-0}" -gt 0 ] || [ "${P_PULL_POST:-0}" = "1" ]; then
         _sleep_s="$PROBE_RECHECK_GAP"
     fi
     sleep "$_sleep_s"
