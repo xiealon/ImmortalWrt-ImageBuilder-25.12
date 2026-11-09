@@ -2930,8 +2930,10 @@ verify_bouncer_verify() {
     # 软告警探针：先看一眼规则有没有真落地，再走原有的三项硬判据
     _bouncer_rule_sane
     ct_running || return 1
-    bouncer_exists || return 1
-    # 2 = 判不了，原样上抛给调用方：它据此「继续等」，不当成「坏了」去重签
+    bouncer_exists
+    _be=$?
+    # 0 继续；1 = 确实没了（该重签）；2 = 判不了，原样上抛，交给窗口去等
+    [ "$_be" = "0" ] || return "$_be"
     bouncer_pulling
 }
 build_bouncer_verify() {
@@ -4089,8 +4091,14 @@ bouncer_pulling() {
     return 0
 }
 
+# 返回 0 = 在，1 = 确实不在，2 = 判不了（cscli 没跑成）。
+# 必须分三态：调用方要区分「bouncer 没了」和「容器不理我」——
+# 前者该重签 api_key，后者重签毫无意义（僵死容器连 cscli 都调不动）。
 bouncer_exists() {
-    _ct_env "$CSCLI bouncers list" 2>/dev/null | grep -qE "^[[:space:]]*${BOUNCER_NAME}[[:space:]]"
+    _be_raw="$(_ct_env "$CSCLI bouncers list" 2>/dev/null)"
+    _be_rc=$?
+    [ "$_be_rc" = "0" ] || return 2
+    printf '%s\n' "$_be_raw" | grep -qE "^[[:space:]]*${BOUNCER_NAME}[[:space:]]"
 }
 
 
