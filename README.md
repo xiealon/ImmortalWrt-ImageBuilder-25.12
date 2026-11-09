@@ -43,11 +43,11 @@ ImmortalWrt 25.12.2 x86-64 构建线：ImageBuilder 用官方 docker 镜像、�
 1. **CrowdSec LXC 容器** —— `files/etc/crowdsec/lxc-crowdsec.tar.gz` 取自 CloudRunFilesBuilder 的 `lxc-*` Release，用 prepare 脚本与 `rootfs-skel/` 的 sha256 逐字节比对，对不上直接 `exit 1`，不产出「能开机但容器起不来」的固件。
 2. **`rootfs-skel/`** —— 容器网络（固定 `10.1.0.10` / `10.1.0.1`）与 guard 脚本的单一来源，`build25.sh` 把它拷进固件成为 `/rom` 只读基准，`crowdsec-guard` 每 60 秒逐字节比对。
 3. **`pkg-restore.sh` / `pkg-restore-apps.sh`** —— 刷机后被 `apk del` 或误删的关键文件，从 `/rom` 补回来的恢复链；`_DEPS_PKGS` 里含 `kmod-zram`。
-4. **`shell/apk-custom-packages.sh`** —— 应用包清单。honk 组（5 包）与 daed 组都装。
+4. **`shell/apk-custom-packages.sh`** —— 应用包清单。eBPF 代理只用一套：本线装 **daed 三件套**（`daed` / `luci-app-daede` / `vmlinux-btf`），honk 组已移除；要换回 honk 就改这一行 + `build25.sh` 的取包段（两条自建线里有现成写法）。
 
 ## 内核
 
-honk 是 eBPF 代理，靠 fentry/fexit 挂内核函数，依赖这几项：
+honk / daed 都是 eBPF 代理，靠 fentry/fexit 挂内核函数，依赖这几项：
 
 | 选项 | 主线（官方镜像自带） | 自建线（honk / daed） |
 |---|---|---|
@@ -58,6 +58,8 @@ honk 是 eBPF 代理，靠 fentry/fexit 挂内核函数，依赖这几项：
 | `CONFIG_DEBUG_INFO_BTF` | 随官方镜像 | **y**，构建期断言 |
 
 自建线的价值是**确定**：五项写死在自建内核里，workflow 解开 IB 后逐项 grep，缺一项 `::error::` + `exit 1`。实测（25.12-daed #31，内核 `6.12.103`）：八项全 `y`，`available_filter_functions` 66,989 个，`/sys/kernel/btf/vmlinux` 5,147,981 B，honk-core 启动即 `eBPF loaded and attached`。
+
+**主线不编译内核，只能补 BTF 包**：`vmlinux-btf-6.12.103-r1-x86_64.apk`（1,676,424 B）随 daed 一起进固件，提供的 BTF 与官方内核同版，daed 启动时读的就是它；`CONFIG_DYNAMIC_FTRACE` 那几项随官方镜像走，本仓**不做断言**。所以主线的 eBPF 挂载成功率取决于上游镜像，不像自建线那样有构建期保证 —— 这也是保留两条自建线的原因。
 
 写进 `imm25.config` 改不动内核 —— ImageBuilder 不编译内核，那几行只是配置回显。内核选项在自建 IB 包里，见 [`25.12-honk`](https://github.com/xiealon/ImmortalWrt-ImageBuilder-25.12-honk)。
 
