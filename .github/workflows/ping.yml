@@ -1,0 +1,12 @@
+name: ping
+on:
+  workflow_dispatch:
+jobs:
+  p22:
+    runs-on: ubuntu-22.04
+    steps:
+      - run: echo "22.04 ok"
+  p24:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "24.04 ok"
