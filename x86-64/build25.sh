@@ -249,50 +249,87 @@ _gh_fixname() {
     return 1
 }
 
-# honk：apk 改从自家的 CloudRunFilesBuilder Release 取，不再挂 daeuniverse 第三方源。
-# 为什么换：openwrt.daeuniverse.org 是上游 beta 期临时源，包随时可能被撤；
-# 而 honk-apk Release 是同一套 apk 的镜像，版本由 CloudRunFilesBuilder 定时跟踪。
-# 落点与 OpenClash 一致（packages/），make image 会把它当本地包装进固件。
-# 依赖一并取：luci-app-honk 要 luci-lib-daeuniverse；vmlinux-btf-builtin 是 BTF 哨兵，
-# 装前检查 /sys/kernel/btf/vmlinux，缺了 honk-core 起不来。
-if echo "$PACKAGES" | grep -q "honk"; then
-    _hk_api="https://api.github.com/repos/xiealon/CloudRunFilesBuilder/releases/tags/honk-apk"
-    echo "==> honk: 读取 Release 资产清单"
-    echo "    $_hk_api"
-    _hk_json=$(wget -qO- --timeout=30 --tries=3 "$_hk_api" 2>/dev/null) || _hk_json=""
-    if [ -z "$_hk_json" ]; then
-        echo "::error::honk: 取不到 honk-apk Release 资产清单（网络不通或 Release 不存在）"
+# daed：新版 daed 三件套，从 kenzok8/openwrt-daede 的 release 取。
+#
+# 【2026-11-10】用户定：官方 25.12 线去掉 honk、改用新版 daed。
+# 三件（全部 x86_64，版本随 release tag 走，不写死）：
+#   daed-<ver>-x86_64.apk                 主程序，内嵌 Web UI，约 24.8 MiB
+#   luci-app-daede-<ver>-x86_64.apk       LuCI 界面（PKGARCH:=all），约 97 KiB
+#   vmlinux-btf-6.12.<n>-r<r>-x86_64.apk  BTF 包，必须与目标内核同版
+#
+# 为什么用 kenzok8 这套而不是官方 feed：
+#   25.12 官方源里没有 daed / luci-app-daed；旧做法靠 store 的 .run 包解 ipk，
+#   那是 opkg 格式，25.12 的 apk 装不了。kenzok8 直接给 apk v3，且同时出
+#   x86_64 的 vmlinux-btf，版本跟内核对齐。
+#
+# vmlinux-btf 为什么必须取：daed 的 Makefile 有
+#   DEPENDS: ... +DAED_USE_VMLINUX_BTF:vmlinux-btf
+# 缺包时 make image 直接报找不到 vmlinux-btf。25.12 内核虽自带 BTF，但包名依赖
+# 是硬约束；版本对不上（如 6.12.79 配 6.12.103 内核）daed 的 eBPF 校验会失败，
+# 所以下面既取最新 6.12.x，又拿 include/kernel-version.mk 校验一致才继续。
+if echo "$PACKAGES" | grep -q "daed"; then
+    _dd_api="https://api.github.com/repos/kenzok8/openwrt-daede/releases/latest"
+    echo "==> daed: 读取 Release 资产清单"
+    echo "    $_dd_api"
+    _dd_json=$(wget -qO- --timeout=30 --tries=3 "$_dd_api" 2>/dev/null) || _dd_json=""
+    if [ -z "$_dd_json" ]; then
+        echo "::error::daed: 取不到 openwrt-daede Release 资产清单（网络不通或 Release 不存在）"
         exit 1
     fi
-    _hk_n=0
-    for _hk_pkg in honk luci-app-honk luci-lib-daeuniverse luci-i18n-daeuniverse-zh-cn vmlinux-btf-builtin; do
-        # 〔2026-11-09】取版本号最大的，不取第一个匹配。
-        # 起因：honk-apk Release 升到 beta6 时，旧的 beta4 资产没被删掉，
-        # assets 列表里 beta4 排在前面，head -n1 会挑到旧版 —— 构建出来还是旧固件。
-        # sort -V 按版本号排序，beta6 > beta4，与另两个仓一致。
-        _hk_url=$(printf '%s' "$_hk_json" \
-            | grep -oE "\"https://[^\"]*/${_hk_pkg}-[0-9][^\"]*\.apk\"" \
+    _dd_n=0
+    _DAED_BTF_VER=""
+
+    # BTF 包单独取：只认 x86_64 的 6.12.x，版本号记进 _DAED_BTF_VER，
+    # 供下面「来源 A 拷贝」那段白名单放行（否则会被 vmlinux-btf-[0-9]* 挡掉）。
+    _dd_btf_url=$(printf '%s' "$_dd_json" \
+        | grep -oE "\"https://[^\"]*/vmlinux-btf-6\.12\.[0-9]+-r[0-9]+-x86_64\.apk\"" \
+        | tr -d '"' | sort -V | tail -n1)
+    if [ -z "$_dd_btf_url" ]; then
+        echo "::error::daed: Release 里没有 x86_64 的 vmlinux-btf-6.12.*-r*.apk"
+        exit 1
+    fi
+    _DAED_BTF_VER=$(basename "$_dd_btf_url" | sed -n 's/^vmlinux-btf-\(6\.12\.[0-9]*\)-r[0-9]*-x86_64\.apk$/\1/p')
+    if [ -z "$_DAED_BTF_VER" ]; then
+        echo "::error::daed: 解析不出 BTF 版本号（$_dd_btf_url）"
+        exit 1
+    fi
+    # 与目标内核版本对齐 —— 不一致就让构建停在这里，别等 daed 起不来才查
+    _dd_kver=$(sed -n 's/^LINUX_VERSION-6\.12 = //p' \
+        /home/build/immortalwrt/include/kernel-version.mk 2>/dev/null | head -n1)
+    if [ -n "$_dd_kver" ] && [ "$_dd_kver" != "$_DAED_BTF_VER" ]; then
+        echo "::error::daed: vmlinux-btf 版本 $_DAED_BTF_VER 与目标内核 $_dd_kver 不一致，daed 的 eBPF 校验会失败"
+        exit 1
+    fi
+    echo "    BTF 版本 $_DAED_BTF_VER（目标内核 ${_dd_kver:-未知，跳过校验}）"
+    echo "    ↓ $(basename "$_dd_btf_url")"
+    wget -q "$_dd_btf_url" -P /home/build/immortalwrt/packages/ \
+        || { echo "::error::daed: 下载失败 $_dd_btf_url"; exit 1; }
+    _dd_n=$((_dd_n + 1))
+
+    for _dd_pkg in daed luci-app-daede; do
+        # 取版本号最大的，不取第一个匹配 —— Release 里同名包可能留着旧版资产，
+        # head -n1 会挑到旧的，构建出来还是上一代固件（honk 线踩过这个坑）。
+        _dd_url=$(printf '%s' "$_dd_json" \
+            | grep -oE "\"https://[^\"]*/${_dd_pkg}-[0-9][^\"]*x86_64[^\"]*\.apk\"" \
             | tr -d '"' | sort -V | tail -n1)
-        if [ -z "$_hk_url" ]; then
-            echo "::error::honk: Release 里没有 ${_hk_pkg}-*.apk"
+        if [ -z "$_dd_url" ]; then
+            echo "::error::daed: Release 里没有 ${_dd_pkg}-*x86_64*.apk"
             exit 1
         fi
-        echo "    ↓ $(basename "$_hk_url")"
-        wget -q "$_hk_url" -P /home/build/immortalwrt/packages/ \
-            || { echo "::error::honk: 下载失败 $_hk_url"; exit 1; }
-        # GitHub 把资产名里的 ~ 换成 .，包内 pkgver 仍是 ~ —— 必须改回来，
-        # 否则 make image 的 package_install 找不到文件（run #18 就是这么挂的）
-        _gh_fixname "/home/build/immortalwrt/packages/$(basename "$_hk_url")" || exit 1
-        _hk_n=$((_hk_n + 1))
+        echo "    ↓ $(basename "$_dd_url")"
+        wget -q "$_dd_url" -P /home/build/immortalwrt/packages/ \
+            || { echo "::error::daed: 下载失败 $_dd_url"; exit 1; }
+        # GitHub 可能把资产名里的 ~ 换成 .，包内 pkgver 仍是 ~ —— 必须改回来，
+        # 否则 make image 的 package_install 找不到文件（25.12 honk 线 run #18 就这么挂的）
+        _gh_fixname "/home/build/immortalwrt/packages/$(basename "$_dd_url")" || exit 1
+        _dd_n=$((_dd_n + 1))
     done
-    echo "✅ honk: $_hk_n 个 apk 已进 packages/（版本随 Release 走）"
-    ls -l /home/build/immortalwrt/packages/honk-*.apk \
-          /home/build/immortalwrt/packages/luci-app-honk-*.apk \
-          /home/build/immortalwrt/packages/luci-lib-daeuniverse-*.apk \
-          /home/build/immortalwrt/packages/luci-i18n-daeuniverse-zh-cn-*.apk \
-          /home/build/immortalwrt/packages/vmlinux-btf-builtin-*.apk 2>/dev/null || true
+    echo "✅ daed: $_dd_n 个 apk 已进 packages/（版本随 Release 走，BTF=$_DAED_BTF_VER）"
+    ls -l /home/build/immortalwrt/packages/daed-*.apk \
+          /home/build/immortalwrt/packages/luci-app-daede-*.apk \
+          /home/build/immortalwrt/packages/vmlinux-btf-*.apk 2>/dev/null || true
 else
-    echo "⚪️ 未选择 honk"
+    echo "⚪️ 未选择 daed"
 fi
 
 # OpenClash 的 apk 也是直接从 GitHub Release 下的，资产名同样会被 GitHub 把 ~
