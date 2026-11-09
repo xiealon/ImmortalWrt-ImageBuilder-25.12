@@ -12,6 +12,48 @@ LOCK=/tmp/.crowdsec-lxc-bootstrap.lock
 # 这里这份纯标记，改它不会触发任何重写。
 SCRIPT_VER="2026-11-09.2130"
 
+# ---- 【2026-11-10】timeout 兜底 ----
+# 真机实测（24.10 线，2026-11-10 02:20）：
+#   /etc/rc.local: line 77: timeout: not found
+# 固件的 busybox 里没有 timeout applet（ImageBuilder 用的 busybox 是预编译包，
+# 构建期 config 改不动它），于是下面所有带硬限的调用全部 rc=127 静默失败。
+# 最致命的是第 77 行 —— bootstrap 一次都没被启动，表现就是「开机只写一行
+# 前置检查，Router IP 不变，guard / smartdns / 应用包恢复全都不执行」。
+# 这里改成：有 timeout 就用，没有就退化成「后台跑 + 看门狗 kill」的等价实现，
+# 超时被杀统一换算成 124，与原 timeout 的语义保持一致。
+_run_capped() {
+    _rc_s="$1"; shift
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$_rc_s" "$@"
+        return $?
+    fi
+    if [ -z "$_rc_warned" ]; then
+        echo "[$(date '+%F %T')] 【timeout】固件里没有 timeout 命令，已降级为看门狗模式（功能不变）" >>"$LOG"
+        _rc_warned=1
+    fi
+    "$@" &
+    _rc_pid=$!
+    _rc_flag="/tmp/.rc_cap_timeout.$$"
+    rm -f "$_rc_flag" 2>/dev/null
+    (
+        sleep "$_rc_s"
+        : > "$_rc_flag" 2>/dev/null
+        kill -TERM "$_rc_pid" 2>/dev/null
+        sleep 3
+        kill -KILL "$_rc_pid" 2>/dev/null
+    ) &
+    _rc_wd=$!
+    wait "$_rc_pid"
+    _rc_rc=$?
+    kill "$_rc_wd" 2>/dev/null
+    if [ -f "$_rc_flag" ]; then
+        rm -f "$_rc_flag" 2>/dev/null
+        return 124
+    fi
+    return $_rc_rc
+}
+
+
 # ---- 阶段【完整性】：以只读分区为基准复原核心脚本，必须排在任何前置检查之前 ----
 # 顺序是硬要求：bootstrap 被删时下面的存在性检查会直接 exit 0，那样就再没有
 # 机会把它恢复回来。放在前面，前置检查看到的永远是复原后的现场。
@@ -74,7 +116,7 @@ date +%s > "$LOCK/ts" 2>/dev/null
 # 【v.108.67】同步等待加了硬顶。rc.local 由 rcS 收尾阶段执行，这一句卡住会把
 # 开机收尾一起拖住；而 bootstrap 的「节点数 × 10s」本身没有上界。
 # 124 = 撞上限被终止，锁在下一句照常释放（rm -rf），不会留下永久的陈旧锁。
-timeout "${CS_RC_BOOT_MAX:-1800}" /bin/sh "$BOOT" $BOOT_MODE >>"$LOG" 2>&1
+_run_capped "${CS_RC_BOOT_MAX:-1800}" /bin/sh "$BOOT" $BOOT_MODE >>"$LOG" 2>&1
 _rc=$?
 [ "$_rc" = 124 ] && echo "[$(date '+%F %T')] 【超时】bootstrap 超过 ${CS_RC_BOOT_MAX:-1800}s 未返回，已终止（容器或网络卡住）" >>"$LOG"
 # ---- 小步骤 释放引导锁 ----
@@ -96,10 +138,10 @@ SD_RESTORE=/usr/sbin/pkg-restore-smartdns.sh
 if [ -x "$SD_RESTORE" ]; then
     SD_UP_N=$(uci -q show smartdns 2>/dev/null | grep -c '=server$')
     case "$SD_UP_N" in '' | *[!0-9]*) SD_UP_N=0 ;; esac
-    if timeout 20 /bin/sh "$SD_RESTORE" --check >/dev/null 2>&1 && [ "$SD_UP_N" -gt 0 ]; then
+    if _run_capped 20 /bin/sh "$SD_RESTORE" --check >/dev/null 2>&1 && [ "$SD_UP_N" -gt 0 ]; then
         echo "[$(date '+%F %T')] 【DNS】配置已在位（53 归 smartdns，上游 $SD_UP_N 条），跳过重写" >>"$LOG"
     else
-        timeout 60 /bin/sh "$SD_RESTORE" --config >>"$LOG" 2>&1
+        _run_capped 60 /bin/sh "$SD_RESTORE" --config >>"$LOG" 2>&1
         [ "$?" = 0 ] || echo "[$(date '+%F %T')] 【DNS】smartdns 配置未完成（详见上方日志，探针会继续兜底）" >>"$LOG"
     fi
 else
@@ -113,10 +155,10 @@ fi
 PA_RESTORE=/usr/sbin/pkg-restore-apps.sh
 PKG_RESTORE=/usr/sbin/pkg-restore.sh
 if [ -x "$PA_RESTORE" ]; then
-    if timeout 30 /bin/sh "$PA_RESTORE" --check >/dev/null 2>&1; then
+    if _run_capped 30 /bin/sh "$PA_RESTORE" --check >/dev/null 2>&1; then
         echo "[$(date '+%F %T')] 【应用包】主程序齐全，跳过装回" >>"$LOG"
     else
-        timeout 180 /bin/sh "$PA_RESTORE" --repair >>"$LOG" 2>&1
+        _run_capped 180 /bin/sh "$PA_RESTORE" --repair >>"$LOG" 2>&1
         _pa_rc=$?
         echo "[$(date '+%F %T')] 【应用包】已尝试装回缺失项（rc=$_pa_rc，详见上方日志）" >>"$LOG"
     fi
@@ -127,7 +169,7 @@ if [ -f "$PKG_RESTORE" ]; then
     if /bin/sh "$PKG_RESTORE" --deps --check >/dev/null 2>&1; then
         echo "[$(date '+%F %T')] 【依赖文件】kmod / 数据文件齐全，跳过补回" >>"$LOG"
     else
-        timeout 180 /bin/sh "$PKG_RESTORE" --deps --repair >>"$LOG" 2>&1
+        _run_capped 180 /bin/sh "$PKG_RESTORE" --deps --repair >>"$LOG" 2>&1
         _pk_rc=$?
         echo "[$(date '+%F %T')] 【依赖文件】已尝试从只读基底补回（rc=$_pk_rc，详见上方日志）" >>"$LOG"
     fi
