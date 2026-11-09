@@ -802,22 +802,10 @@ probe_tick() {
     _up_watch
     # 应用主程序通道同样必须排在 last_pull 判定之前：应用被删不影响 last_pull，
     # 放在「链路正常就 return 0」后面等于永远不执行 —— v.180.117 在 DNS 上踩过这一脚。
-    # 【2026-11-09 用户定】应用包与内核模块改为「每次开机只跑一次」，不再每轮扫。
-    # 依据：探针已跑 156 轮，appbad / kmodbad 全为 0，一次修复都没触发过；
-    #       包被删不影响转发，开机补一次够用。last_pull / DNS 两条通道不受影响。
-    # 标记放 /tmp（tmpfs，重启即清），每次开机首轮跑一次，之后直接 sleep。
-    if [ ! -f /tmp/.cs-apps-kmods-once ]; then
-        # 〔2026-11-09〕只跑一轮，「连续 N 轮确认」就失效了：首轮不修就没有第二轮。
-        # 这里临时把阈值压到 1，发现即修；跑完立即还原。
-        _sr_save="$PROBE_STALL_ROUNDS"
-        PROBE_STALL_ROUNDS=1
-        _apps_watch
-    # 应用依赖的内核模块同理：/lib/modules 里的 .ko 被删不影响 last_pull，
-    # 排在「链路正常就 return 0」后面等于永远不执行。
-        _kmods_watch
-        PROBE_STALL_ROUNDS="$_sr_save"
-        : > /tmp/.cs-apps-kmods-once
-    fi
+    # 【2026-11-09 用户定】应用包与内核模块不再由探针扫，已移到 rc.local 开机补一次。
+    # 两者都是独立脚本（pkg-restore-apps.sh / pkg-restore.sh --deps），rc.local 直接调即可。
+    # 探针 156 轮 appbad / kmodbad 全为 0，从未触发过修复；包被删不影响转发。
+    # 函数 _apps_watch / _kmods_watch 保留未删，便于需要时回退。
     # 【v.180.189】lxc 二进制的文件级判据，同样必须在此之前：
     # 删掉 /usr/bin/lxc-snapshot 不影响 last_pull，排在后面等于永远不执行。
     _lxc_watch
