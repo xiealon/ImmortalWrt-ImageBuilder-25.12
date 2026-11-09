@@ -72,6 +72,9 @@ PROBE_FAIL_ALERT="${CS_PROBE_FAIL_ALERT:-3}"
 # 〔2026-11-09 用户定〕30 轮 x 600s = 5 小时，太长。改成 3 轮 = 30 分钟，
 # 与改动前（30 轮 x 60s）等价。--verify-only 只读不写，单次 20~40 秒。
 PROBE_AUDIT_EVERY="${CS_PROBE_AUDIT_EVERY:-3}"
+# 【2026-11-09 用户定】体检不符后，隔这么多秒再判第二次、第三次；
+# 三次都不符才动手。60s 是用户给的下限，配两次复验约 3 分钟出结论。
+PROBE_AUDIT_GAP="${CS_PROBE_AUDIT_GAP:-60}"
 # 【v.180.198】bouncer 下发面健康检查间隔（按轮数，默认 10 轮 = 10 分钟）。
 # 与体检同频但独立开关：体检只读（--verify-only 承诺不写），这里要重启服务。
 # 【2026-11-09 用户定】间隔拉到 600s 后，10 轮 = 100 分钟才查一次 bouncer，
@@ -772,13 +775,31 @@ probe_tick() {
         elif ! _boot --probe-check >/dev/null 2>&1; then
             P_ACTION="audit-wait-bouncer"
             plog "【体检】第 ${P_ROUND} 轮：有项不符，但 last_pull 此刻无效 —— 不抢跑，交给停滞判定处置"
-        elif _boot --verify-only >>"$BOOT_LOG" 2>&1; then
-            plog "【体检】第 ${P_ROUND} 轮：首检不符、复检通过（偶发），不动现场"
-            P_AUDIT_BAD=0
         else
-            P_AUDIT_BAD=$((${P_AUDIT_BAD:-0} + 1))
-            plog "【体检】第 ${P_ROUND} 轮：首检与复检都不符（连续 ${P_AUDIT_BAD} 次），重跑引导按需补齐"
-            _run_fix
+            # 【2026-11-09 用户定】首次不符后不立刻定案：隔 PROBE_AUDIT_GAP 秒
+            # 再判第二次、第三次，三次都不符才动手。留间隔是为了给容器 / 网络
+            # 一个自愈窗口，避免把「正在恢复中」误判成「真坏了」。
+            # 正常耗时约 60+30+60+30 = 3 分钟；verify 卡死时各受 PROBE_VERIFY_MAX 约束。
+            _au_ok=0
+            _au_n=0
+            while [ "$_au_n" -lt 2 ]; do
+                sleep "$PROBE_AUDIT_GAP"
+                _au_n=$((_au_n + 1))
+                if _boot --verify-only >>"$BOOT_LOG" 2>&1; then
+                    _au_ok=1
+                    break
+                fi
+            done
+            if [ "$_au_ok" = "1" ]; then
+                P_ACTION="audit-retry-ok"
+                plog "【体检】第 ${P_ROUND} 轮：首次不符，第 ${_au_n} 次复验通过（偶发），不动现场"
+                P_AUDIT_BAD=0
+            else
+                P_AUDIT_BAD=$((${P_AUDIT_BAD:-0} + 1))
+                P_ACTION="audit-fix"
+                plog "【体检】第 ${P_ROUND} 轮：连判 3 次都不符（${_au_n} 次复验均失败，累计 ${P_AUDIT_BAD} 次），重跑引导按需补齐"
+                _run_fix
+            fi
         fi
     fi
     # 【v.180.198】bouncer 下发面：与体检同频（每 PROBE_HEAL_EVERY 轮）。
