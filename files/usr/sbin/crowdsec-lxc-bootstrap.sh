@@ -46,7 +46,7 @@
 #   也摘掉，否则 exit 会二次触发 EXIT、恢复逻辑跑两遍（这个坑踩过一次）。
 #   顺序：先做重装失败计数、再做恢复——反了的话计数会读到已被清空的状态。
 
-SCRIPT_VER="2026-11-09.2340"
+SCRIPT_VER="2026-11-09.2350"
 
 LXC_NAME="${LXC_NAME:-ubuntu}"
 CS_HOME="${CS_HOME:-/etc/crowdsec}"
@@ -2927,8 +2927,33 @@ _bouncer_rule_sane() {
             ''|*[!0-9]*) _brs_drop=0 ;;
         esac
         if [ "$_brs_drop" -eq 0 ]; then
-            log "[bouncer] ** 结构探针：crowdsec-chain-input 里没有任何 drop 规则（决策未下发到防火墙）"
-            log "[bouncer] ** 排查：nft list chain ip crowdsec crowdsec-chain-input ；日志见 $_BC_LOG"
+            # 【2026-11-09 用户定】drop 数单独没有意义：空载机器（0 条决策）本来就是 0 条 drop。
+            # 本机实测：set crowdsec-blacklists 0 元素、两条 chain 各 0 条 drop、cscli 0 条决策 —— 健康。
+            # 判据必须成对：只有「LAPI 有决策、防火墙却一条 drop 都没有」才是 bouncer 没下发。
+            if _brs_raw="$(ct cscli decisions list -o raw 2>/dev/null)"; then
+                _brs_dec="$(printf '%s\n' "$_brs_raw" | tail -n +2 | grep -c . || true)"
+                case "$_brs_dec" in ''|*[!0-9]*) _brs_dec=0 ;; esac
+                if [ "$_brs_dec" -eq 0 ]; then
+                    log "[bouncer] 结构探针：LAPI 无决策、防火墙无 drop —— 空载正常"
+                else
+                    log "[bouncer] ** 结构探针：LAPI 有 $_brs_dec 条决策，防火墙 0 条 drop（bouncer 未下发）"
+                    log "[bouncer] ** 修复：重启 crowdsec-firewall-bouncer"
+                    if _bouncer_service_restart; then
+                        sleep 3 2>/dev/null || sleep 1
+                        _brs_drop2="$(nft list chain ip crowdsec crowdsec-chain-input 2>/dev/null | grep -c 'drop' || true)"
+                        case "$_brs_drop2" in ''|*[!0-9]*) _brs_drop2=0 ;; esac
+                        if [ "$_brs_drop2" -gt 0 ]; then
+                            log "[bouncer] 重启后已下发 $_brs_drop2 条 drop 规则"
+                        else
+                            log "[bouncer] ** 重启后 3s 仍 0 条 drop（bouncer 拉取延迟或决策未进 set）"
+                        fi
+                    else
+                        log "[bouncer] ** 重启失败，需人工介入"
+                    fi
+                fi
+            else
+                log "[bouncer] 结构探针：0 条 drop，决策数取不到（cscli 失败或超时），本条不判"
+            fi
         fi
     fi
     # ② 错误探针：只读最后 200 行（约覆盖 2 天的 15 分钟心跳），轮转后读不到就放过
