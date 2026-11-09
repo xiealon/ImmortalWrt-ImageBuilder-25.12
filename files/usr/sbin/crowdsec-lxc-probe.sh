@@ -54,9 +54,14 @@ PROBE_INTERVAL="${CS_PROBE_INTERVAL:-600}"
 # 〔2026-11-09 用户定〕间隔 60s->600s 后，每轮就是 10 分钟；
 # 原来 3 轮 = 3 分钟确认，现在 3 轮 = 30 分钟，太慢。改成 2 轮 = 20 分钟。
 PROBE_STALL_ROUNDS="${CS_PROBE_STALL_ROUNDS:-2}"
-# last_pull 单独保留 3 轮：它触发的是完整 bootstrap（重建容器 / 重建网络，
-# 真机出现过 veth 被甩掉），误判代价太大，必须比其他通道更保守。
-PROBE_STALL_ROUNDS_PULL="${CS_PROBE_STALL_ROUNDS_PULL:-3}"
+# last_pull 走「发现即修」：阈值 1 轮。
+# 防抖不靠这一层，靠两道已有的闸：
+#   ① 判据三态（bouncer_pulling 返回 2 = 判不了），判不了根本不计入停滞；
+#   ② bootstrap 的 build_bouncer_verify 自带 60s 等待窗口（12 × 5s），
+#      真抖动在那一层就被吸收掉，只有持续 60s 没刷新才往下走。
+# --probe-check 与完整引导是同一个脚本的两个入口，完整引导的第一步就是
+# 同一个 bouncer_pulling —— 外层再判三次是同一个判定跑四遍。
+PROBE_STALL_ROUNDS_PULL="${CS_PROBE_STALL_ROUNDS_PULL:-1}"
 # 【2026-11-09 用户定】有通道进入「待确认」（计数 >0 且未达阈值）时，
 # 下一轮不等 PROBE_INTERVAL，改成隔这么多秒再判一次。60s 足够排除瞬时抖动，
 # 又不用让 DNS / lxc 中断硬等 10 分钟。
@@ -838,7 +843,17 @@ probe_tick() {
     # 【v.180.189】lxc 二进制的文件级判据，同样必须在此之前：
     # 删掉 /usr/bin/lxc-snapshot 不影响 last_pull，排在后面等于永远不执行。
     _lxc_watch
-    if _boot --probe-check >/dev/null 2>&1; then
+    # 【2026-11-09 用户定】判据三态：0 在拉 / 1 失效 / 2 判不了。
+    # 判不了（cscli 超时 124 / attach 失败 / 时间戳解析不了）不计入停滞、不动手 ——
+    # 证据不足就去跑完整引导，等于拿一次重建赔一次 10 秒的容器繁忙。
+    _pk_rc=0
+    _boot --probe-check >/dev/null 2>&1 || _pk_rc=$?
+    if [ "$_pk_rc" = "2" ]; then
+        P_ACTION="pull-unknown"
+        plog "【停滞】last_pull 判不了（cscli/attach 没拿到结果），本轮不计入、不修"
+        return 0
+    fi
+    if [ "$_pk_rc" = "0" ]; then
         if [ "${P_STALL:-0}" -gt 0 ]; then
             plog "【恢复】last_pull 已恢复（停滞 $P_STALL 轮后）"
         fi
@@ -911,9 +926,15 @@ probe_tick() {
     # 「需人工介入」对 last_pull 停滞永远不可达 —— 每 10 分钟重跑一轮、日志一路报喜，
     # 机器卡在坏状态。这是「不报错、只给错误答案」的典型形态。
     # 退出 0 时再自问一次：仍停滞 = 这轮没修好，按失败计（97 只是给日志一个可辨识的值）。
-    if [ "$_rc" = 0 ] && ! _boot --probe-check >/dev/null 2>&1; then
-        _rc=97
-        plog "【复验未生效】bootstrap 退出 0，但 last_pull 仍停滞（bouncer_verify 是 SOFT 节点，不参与退出码）—— 按失败计"
+    if [ "$_rc" = 0 ]; then
+        _pk_rc2=0
+        _boot --probe-check >/dev/null 2>&1 || _pk_rc2=$?
+        if [ "$_pk_rc2" = "1" ]; then
+            _rc=97
+            plog "【复验未生效】bootstrap 退出 0，但 last_pull 仍停滞（bouncer_verify 是 SOFT 节点，不参与退出码）—— 按失败计"
+        elif [ "$_pk_rc2" = "2" ]; then
+            plog "【复验】last_pull 判不了（命令没跑成），本轮不记失败"
+        fi
     fi
     if [ "$_rc" = 0 ]; then
         P_FAIL=0
