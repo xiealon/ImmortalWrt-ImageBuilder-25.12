@@ -325,15 +325,68 @@ GUARD_CT_TIMEOUT="${CS_GUARD_CT_TIMEOUT:-10}"
 # 不会 respawn —— 与上面两处 attach 是同一种静默停摆。目标写的是 IP、正常 1s 内返回，
 # 5s 只兜「卡死」这一种，不改变任何正常路径的判定。
 GUARD_WGET_TIMEOUT="${CS_GUARD_WGET_TIMEOUT:-5}"
+# 【2026-11-10.0436】超时包装：固件里有 timeout 就用，没有就降级成看门狗。
+# 本文件的三处 timeout 都是「防 procd 静默停摆」的硬顶：
+#   _ct_run / _ct_shell 的 lxc-attach（容器内 cmp / 恢复 / cscli）
+#   /health 的 wget
+# 固件里没有 timeout 时，这三处全部恒返回 127 —— 而且**不是报错**：
+#   _ct_run 带 2>/dev/null，127 被吞掉，调用方看到的是「容器里没有输出」，
+#   于是 cmp 判不一致、恢复走空、cscli 判失败。整套容器侧保护静默失效。
+# 也就是说：guard 即使被探针正常调起，只要缺 timeout，它做的仍是零件事。
+_gr_cap() {
+    _gc_cap="$1"; shift
+    if [ -z "$_GR_TO_PROBED" ]; then
+        if command -v timeout >/dev/null 2>&1; then
+            _GR_TO_PROBED=1
+        else
+            _GR_TO_PROBED=0
+            if [ -z "$_GR_TO_MISS" ]; then
+                _GR_TO_MISS=1
+                _glog "【timeout】固件里没有 timeout 命令，已降级为看门狗模式（功能不变）"
+            fi
+        fi
+    fi
+    if [ "$_GR_TO_PROBED" = "1" ]; then
+        timeout "$_gc_cap" "$@"
+        return $?
+    fi
+    _gc_tf="/tmp/.gr_cap_$$"
+    rm -f "$_gc_tf"
+    "$@" &
+    _gc_p=$!
+    (
+        _gc_i=0
+        while [ "$_gc_i" -lt "$_gc_cap" ]; do
+            kill -0 "$_gc_p" 2>/dev/null || exit 0
+            sleep 1
+            _gc_i=$((_gc_i + 1))
+        done
+        : >"$_gc_tf"
+        kill -TERM "$_gc_p" 2>/dev/null
+        sleep 1
+        kill -KILL "$_gc_p" 2>/dev/null
+    ) &
+    _gc_w=$!
+    wait "$_gc_p" 2>/dev/null
+    _gc_rc=$?
+    kill -TERM "$_gc_w" 2>/dev/null
+    wait "$_gc_w" 2>/dev/null
+    if [ -f "$_gc_tf" ]; then
+        rm -f "$_gc_tf"
+        return 124
+    fi
+    return "$_gc_rc"
+}
+
 _ct_run() {
-    timeout "$GUARD_CT_TIMEOUT" lxc-attach -P "$GUARD_LXC_PATH" -n "$GUARD_LXC_NAME" -- "$@" 2>/dev/null
+    _gr_cap "$GUARD_CT_TIMEOUT" lxc-attach -P "$GUARD_LXC_PATH" -n "$GUARD_LXC_NAME" -- "$@" 2>/dev/null
 }
 
 # 容器内执行：带一个参数的小脚本。
 # 用 sh -c '...' -- "$1" 而不是把参数拼进脚本文本 —— 时间串里有空格和冒号，
 # 拼进去就要处理引号，而引号在这里出错的后果是「判不了」，且只在某些时间值上出现。
 _ct_shell() {
-    timeout "$GUARD_CT_TIMEOUT" lxc-attach -P "$GUARD_LXC_PATH" -n "$GUARD_LXC_NAME" -- /bin/sh -c "$1" -- "$2" 2>/dev/null
+    _gr_cap "$GUARD_CT_TIMEOUT" lxc-attach -P "$GUARD_LXC_PATH" -n "$GUARD_LXC_NAME" -- /bin/sh -c "$1" -- "$2" 2>/dev/null
 }
 
 # 【v.108.57】last_pull 新鲜度：封禁到底有没有下发到防火墙，只有这一条能证明。
@@ -438,7 +491,7 @@ _lapi_audit() {
 
     # ① 健康：从宿主探 10.1.0.10:8080。不通就到此为止 —— 链路本身断了，
     # 再报 last_pull 停滞只是把同一个原因说两遍。
-    if ! timeout "$GUARD_WGET_TIMEOUT" wget -qO- --timeout=3 "$GUARD_LAPI_URL/health" 2>/dev/null | grep -q '"status"'; then
+    if ! _gr_cap "$GUARD_WGET_TIMEOUT" wget -qO- --timeout=3 "$GUARD_LAPI_URL/health" 2>/dev/null | grep -q '"status"'; then
         _glog "【LAPI】$GUARD_LAPI_URL/health 不可达 —— 容器未跑 / crowdsec 已停 / 8080 未对外开放"
         return 0
     fi
