@@ -565,7 +565,10 @@ _apps_watch() {
     P_APP_BAD=0
     P_ACTION="app-repair"
     plog "【应用】连续 ${PROBE_STALL_ROUNDS} 轮缺失（$_aw_out），交 pkg-restore-apps.sh 装回"
-    "$_APPS_RESTORE" --repair >>"$BOOT_LOG" 2>&1
+    # 【2026-11-10.0518】加 _cap 兜底：--repair 内部是 opkg/apk 整包安装，
+    # 固件没有 timeout 时裸跑可能卡死整个探针主循环（本通道挂在主循环里，卡住=全停）。
+    # 180s 与 rc.local 第 172 行、_kmods_watch 的 --deps --repair 同口径。
+    _cap 180 "$_APPS_RESTORE" --repair >>"$BOOT_LOG" 2>&1
     # 复判不看脚本退出码：装包可能 exit 0 而包其实没进记账（本地库缺该包时
     # pkg-restore.sh 会逐包 log 失败但整体仍返回非 0；反过来也有 exit 1 而
     # 主要应用都装回来的情况）。唯一可信的判据是再问一次 --check。
@@ -1134,6 +1137,14 @@ while true; do
     # 本通道的 kmods-* 标签要最后落盘才看得见。
     # 代价：每轮多一次 --deps --check（只读包内清单 + [ -e ]，实测约 6 ms）。
     _kmods_watch
+    # 【2026-11-10.0518】应用主程序通道同样挂回。和 _kmods_watch 是同一个病：
+    # 只有定义没有调用点，P_APP_BAD 恒为 0，rc.local 第 155 行只在开机跑一次。
+    # 注意本通道**没有** 60s 加速分支（加速名单只有 P_UP_BAD / P_STALL /
+    # P_PULL_POST / P_KMOD_BAD），所以它就是老老实实每 10 分钟查一次，
+    # 连续 2 轮缺才动手 —— 这是用户定的「保持原样」，此处只补上缺失的调用点。
+    # 放在 _kmods_watch 之后：两者都写 P_ACTION，若同时异常只留后者标签，
+    # 一次只有一个坏是常态，不必为此加并发状态机。
+    _apps_watch
     _probe_save
     # 【2026-11-09 用户定】包缓存体检也归到「每次开机只跑一次」，与应用包同频。
     if [ ! -f /tmp/.cs-pkgcache-once ]; then
