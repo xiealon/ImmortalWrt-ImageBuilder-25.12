@@ -106,4 +106,33 @@ else
     echo "[$(date '+%F %T')] 【DNS】未找到 $SD_RESTORE，跳过 smartdns 配置" >>"$LOG"
 fi
 
+# ---- 阶段【应用包 / 依赖文件】：开机补一次，之后不再扫（2026-11-09 用户定）----
+# 为什么不放探针里：这两项都是独立脚本，不依赖探针的「连续 N 轮 + 冷却」那套机制。
+# 包被删不影响转发，开机补一次够用；探针只留 last_pull / DNS / lxc / bouncer。
+# 两项各自带「该不该有」的门槛（读 /rom 里的 apk 已装库），固件本来没装的应用不会被强装。
+PA_RESTORE=/usr/sbin/pkg-restore-apps.sh
+PKG_RESTORE=/usr/sbin/pkg-restore.sh
+if [ -x "$PA_RESTORE" ]; then
+    if timeout 30 /bin/sh "$PA_RESTORE" --check >/dev/null 2>&1; then
+        echo "[$(date '+%F %T')] 【应用包】主程序齐全，跳过装回" >>"$LOG"
+    else
+        timeout 180 /bin/sh "$PA_RESTORE" --repair >>"$LOG" 2>&1
+        _pa_rc=$?
+        echo "[$(date '+%F %T')] 【应用包】已尝试装回缺失项（rc=$_pa_rc，详见上方日志）" >>"$LOG"
+    fi
+else
+    echo "[$(date '+%F %T')] 【应用包】未找到 $PA_RESTORE，跳过" >>"$LOG"
+fi
+if [ -f "$PKG_RESTORE" ]; then
+    if /bin/sh "$PKG_RESTORE" --deps --check >/dev/null 2>&1; then
+        echo "[$(date '+%F %T')] 【依赖文件】kmod / 数据文件齐全，跳过补回" >>"$LOG"
+    else
+        timeout 180 /bin/sh "$PKG_RESTORE" --deps --repair >>"$LOG" 2>&1
+        _pk_rc=$?
+        echo "[$(date '+%F %T')] 【依赖文件】已尝试从只读基底补回（rc=$_pk_rc，详见上方日志）" >>"$LOG"
+    fi
+else
+    echo "[$(date '+%F %T')] 【依赖文件】未找到 $PKG_RESTORE，跳过" >>"$LOG"
+fi
+
 exit 0
