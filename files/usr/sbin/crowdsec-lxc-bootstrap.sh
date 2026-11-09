@@ -46,7 +46,7 @@
 #   也摘掉，否则 exit 会二次触发 EXIT、恢复逻辑跑两遍（这个坑踩过一次）。
 #   顺序：先做重装失败计数、再做恢复——反了的话计数会读到已被清空的状态。
 
-SCRIPT_VER="2026-11-09.2130"
+SCRIPT_VER="2026-11-09.2245"
 
 LXC_NAME="${LXC_NAME:-ubuntu}"
 CS_HOME="${CS_HOME:-/etc/crowdsec}"
@@ -998,13 +998,28 @@ _preflight() {
 # 本脚本不再有、也不该有 smartdns 的检查入口。
 _lxc_missing_deps() {
     _LXC_MISSING=""
-    # 【2026-10-31.0256】五件套的 command -v 循环删除（用户 2026-10-31：lxc 容器默认必装）。
-    # 保留单次冒烟：任一件被删或 liblxc 断链，lxc-start --version 都会留下痕迹，
-    # 一次进程约 10ms，比五个 command -v 更便宜，还顺带验了动态库。
+    # 【2026-11-09.2245】判据从「只看一次冒烟」扩成「冒烟 + 文件清单」。
+    # 旧注释（2026-10-31.0256）称「任一件被删，lxc-start --version 都会留下痕迹」，
+    # 2026-11-09 真机实测不成立（192.168.1.201 / lxc 7.0.0）：
+    #   五件套是五个独立二进制（inode 2998/2999/2995/480/2982，62816~75104 B），
+    #   rm /usr/bin/lxc-attach 后 lxc-start --version 照打 7.0.0、rc=0。
+    # 所以冒烟只验得动 lxc-start 自身与 liblxc 断链，判不出 stop/ls/info/attach 被删。
+    # 而这些正是 last_pull 依赖的：attach 一缺，_ct_env 直接 127。
+    # --lxc-files 读 /rom/lib/apk/packages/lxc*.list 逐条 [ -e ]，34 个包。
+    # 2026-11-09 真机实测：50 次 2 s，即 40 ms/次（纯扫描约 6 ms，其余是 sh 进程启动）。
+    # 只在引导里跑（开机 / 每 30 分钟体检 / 修复），不进探针每轮。
+    # 三态：0 齐全、1 有缺、2 判不了（只读基底没有清单）—— 2 不阻塞引导。
     case "$(lxc-start --version 2>&1)" in
         *"Error loading"*|*"No such file"*|*"not found"*|*"cannot open shared object"*)
             _LXC_MISSING=" lxc(缺件或动态库)" ;;
     esac
+    if [ -z "$_LXC_MISSING" ] && [ -x /usr/sbin/pkg-restore.sh ]; then
+        _lxd_f="$(/usr/sbin/pkg-restore.sh --lxc-files 2>/dev/null)"; _lxd_rc=$?
+        if [ "$_lxd_rc" = "1" ]; then
+            _lxd_f=$(printf '%s' "$_lxd_f" | tr '\n' ',')
+            _LXC_MISSING=" lxc(文件缺:${_lxd_f%,})"
+        fi
+    fi
     [ -z "$_LXC_MISSING" ]
 }
 
