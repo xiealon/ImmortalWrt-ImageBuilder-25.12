@@ -926,6 +926,7 @@ probe_tick() {
         # 锁存写 P_HUMAN_PULL，不写 P_HUMAN：P_HUMAN 归补印链路。
         # 共用的话，两条链路会互相把对方的自动修复关掉，而根因完全不同。
         P_HUMAN_PULL=1
+        P_PULL_POST=0
         plog "【需人工介入】bootstrap 连续 $P_FAIL 次未能让 last_pull 恢复（本次 $_rc）：判定修复能力对不上现场。按设计此时不重装——重装跑同一套脚本只会重蹈覆辙。请人工检查 $BOOT_LOG"
     else
         P_ACTION="fix-fail"
