@@ -100,22 +100,19 @@ _RESTORE="${RESTORE_BIN:-/usr/sbin/pkg-restore.sh}"
 #
 # 留下的 14 个包全部 firmware=yes + pkg=yes：
 #   clashoo / luci-app-clashoo / luci-i18n-clashoo-zh-cn
-#   honk / luci-app-honk / luci-lib-daeuniverse / luci-i18n-daeuniverse-zh-cn /
-#   vmlinux-btf-builtin
+#   daed / luci-app-daede / vmlinux-btf
 #   sing-box
 #   v2ray-geoip / v2ray-geosite（2026-11-02 补入，只判包不判文件，见 _PA_GEO）
 #   adblock / luci-app-adblock / luci-i18n-adblock-zh-cn（2026-11-02 补入，见 _PA_ADBLOCK；
 #     这三包 pkg=yes 的前提是把它们收进 build25.sh 的 _AK_WANT —— 当日实测包库
 #     116 个 apk 里 adblock 相关 0 个，光加保护组修不动，已一并收进白名单）
 #
-# vmlinux-btf-builtin 为什么也算 honk 组的一员（2026-11-02 真机核实）：
-#   它是 honk 的硬依赖，但 installed size 只有 1 B —— 唯一内容是自己的
-#   lib/apk/packages/vmlinux-btf-builtin.list。apk 的 Depends 里写死了它，
-#   删掉之后 honk 的依赖链就断，apk 任何一次操作都可能顺手把 honk 也带走。
-#   它同时是个哨兵：pre-install 会检查 /sys/kernel/btf/vmlinux，内核没自带
-#   BTF 的机器装不上它 —— 反过来说，它在册就等于「这台机器的内核 BTF 是好的」。
+# vmlinux-btf 为什么也进 daed 组（2026-11-10）：
+#   daed 的 Makefile 写着 +DAED_USE_VMLINUX_BTF:vmlinux-btf，包内 Depends
+#   有它。删掉之后 daed 的依赖链就断，apk 任何一次操作都可能顺手把 daed 带走。
+#   它同时是哨兵：装的是与内核同版的 BTF（6.12.103），启动校验读的就是它；
+#   版本对不上时 daed 起不来，所以它在册 = 「BTF 与内核配套」这件事成立。
 #   恢复走 _pr_tree 从 /rom 拷文件，不需要 apk 源，所以保护是真的生效。
-#   sing-box
 #
 # 内核模块全部移出本表，改由 pkg-restore.sh --deps 做文件级恢复。
 # 原因是决定性的（2026-10-29 实测）：kmod-* 在固件出厂库里（P:kmod-tun 命中），
@@ -142,11 +139,14 @@ _RESTORE="${RESTORE_BIN:-/usr/sbin/pkg-restore.sh}"
 #   libopenssl3        固件库有、包库无 → 装不回；且它是全系统的 TLS 底座，
 #                      不属于某一个应用的依赖
 _PA_CLASHOO="clashoo luci-app-clashoo luci-i18n-clashoo-zh-cn"
-# 【2026-11-02】用户定：需要的 apk 全保护 —— honk 组补上 i18n 包，凑满 5 个。
-# luci-i18n-daeuniverse-zh-cn 是 luci-app-honk 的依赖之一（LuCI 界面要它翻中文），
-# 少了它 honk 那页会退回英文，看上去像「能用」，实际是缺件。它同样在包库里
-# （build25.sh 的 honk 保护组断言盯着这 5 个），所以装得回来，够格进这张表。
-_PA_HONK="honk luci-app-honk luci-lib-daeuniverse luci-i18n-daeuniverse-zh-cn vmlinux-btf-builtin"
+# 【2026-11-10】官方线改用 daed（用户定），保护组整体换过来，三件：
+#   daed          主程序，/usr/bin/daed + /etc/init.d/daed，内嵌 Web UI
+#   luci-app-daede LuCI 界面（kenzok8 的 1.15-r13，自带中文，没有单独 i18n 包）
+#   vmlinux-btf   BTF 包，与内核同版（6.12.103），daed 的 Depends 里有它
+# 三件都在包库 /rom/root/apk-cache 里 —— build25.sh 的 daed 段下载、
+# 构建期断言 _ak_need_daed 也会在打包前核实一遍，所以探针判出缺失时
+# 能从本地装回，不需要联网。
+_PA_DAED="daed luci-app-daede vmlinux-btf"
 # 【2026-11-02】geo 数据单独成组：包级判据（apk info -e），不判文件。
 #
 # 这一组负责的只是「包被人 apk del 掉」——装回时连文件带记账一起回来。
@@ -186,7 +186,7 @@ _PA_ADBLOCK="adblock luci-app-adblock luci-i18n-adblock-zh-cn"
 #   honk 是官方 daeuniverse 源的包，预装进固件后 /rom/lib/apk/db/installed 有 P:honk，
 #   _pa_should 照常命中；被 force-remove 时同样能判出来。
 
-_PA_LIST="${CS_PROBE_APPS:-$_PA_CLASHOO $_PA_HONK $_PA_COMMON $_PA_GEO $_PA_ADBLOCK}"
+_PA_LIST="${CS_PROBE_APPS:-$_PA_CLASHOO $_PA_GEO $_PA_DAED $_PA_COMMON $_PA_ADBLOCK}"
 
 log() { printf '[APP] %s\n' "$*"; }
 
