@@ -46,7 +46,7 @@
 #   也摘掉，否则 exit 会二次触发 EXIT、恢复逻辑跑两遍（这个坑踩过一次）。
 #   顺序：先做重装失败计数、再做恢复——反了的话计数会读到已被清空的状态。
 
-SCRIPT_VER="2026-11-09.2245"
+SCRIPT_VER="2026-11-09.2340"
 
 LXC_NAME="${LXC_NAME:-ubuntu}"
 CS_HOME="${CS_HOME:-/etc/crowdsec}"
@@ -1018,6 +1018,10 @@ _lxc_missing_deps() {
         if [ "$_lxd_rc" = "1" ]; then
             _lxd_f=$(printf '%s' "$_lxd_f" | tr '\n' ',')
             _LXC_MISSING=" lxc(文件缺:${_lxd_f%,})"
+        elif [ "$_lxd_rc" = "2" ]; then
+            # 【2026-11-09】rc=2 = 只读基底里没有 apk 清单（老固件），文件级判据无从下手。
+            # 不阻塞引导，但必须留一行痕迹：否则「二进制被删」在这类机器上永远静默。
+            log "[PKG] 只读基底缺 apk 清单（/rom/lib/apk/packages），文件级判据不可用；本条只判冒烟"
         fi
     fi
     [ -z "$_LXC_MISSING" ]
@@ -4294,6 +4298,18 @@ _cur_boot_id() {
 _reset_quota_ok() {
     _rq_bi=$(_cur_boot_id)
     [ -n "$_rq_bi" ] || return 1
+    # 【2026-11-09 用户定】两条抹现场路径共用一份额度。
+    #   full_reinstall 记在 $RESET_BOOT_FILE，_l3_reset_overlay 记在 $L3_STATE。
+    #   原来各记各的，同一次开机可能连丢两次 upper —— 决策库、日志、machines 记录各丢一遍。
+    if [ -s "$L3_STATE" ]; then
+        _rq_l3bi=""; _rq_l3n=0
+        read -r _rq_l3bi _rq_l3n _rq_ign <"$L3_STATE" 2>/dev/null || true
+        case "$_rq_l3n" in ''|*[!0-9]*) _rq_l3n=0 ;; esac
+        if [ "$_rq_l3bi" = "$_rq_bi" ] && [ "$_rq_l3n" -ge 1 ]; then
+            log "[重装] 本次开机已丢过层（$L3_STATE 记 $_rq_l3n 次），不再给第二次额度"
+            return 1
+        fi
+    fi
     [ "$(cat "$RESET_BOOT_FILE" 2>/dev/null | tr -d ' \t\r\n')" != "$_rq_bi" ]
 }
 
@@ -4566,10 +4582,30 @@ _l3_gate() {
             return 1
         fi
     fi
-    printf '%s %s %s\n' "$_lg_bi" "$((L3_N + 1))" "$_lg_now" \
+    # 【2026-11-09 用户定】与 full_reinstall 共用额度：它记在 $RESET_BOOT_FILE，
+    # 这里也要看一眼，否则同一次开机「结构重装抹一次 + LAPI 丢层再抹一次」。
+    if [ "$(cat "$RESET_BOOT_FILE" 2>/dev/null | tr -d ' \t\r\n')" = "$_lg_bi" ]; then
+        log "[自愈] 丢层被拒：本次开机已由结构重装抹过现场（$RESET_BOOT_FILE），不重复丢"
+        return 1
+    fi
+    # 记账挪到 _l3_consume，由 _l3_reset_overlay 在强停成功后调用 —— 与 full_reinstall 同一时机。
+    # 原来在这里先扣，ct_force_stop / rm -rf 失败时白扣一次，本次开机再没机会。
+    log "[自愈] 丢层放行：本次开机将用第 $((L3_N + 1))/$L3_MAX 次额度（记账在强停成功后）"
+    return 0
+}
+
+# 【2026-11-09】额度记账：强停成功后才写，两个状态文件同时写，让两条路径互相看得见。
+_l3_consume() {
+    _lc_bi="$(_cur_boot_id)"
+    [ -n "$_lc_bi" ] || { log "[自愈] 读不到 boot_id，丢层额度无法记账（本次仍只做这一遍）"; return 0; }
+    _lc_now="$(date +%s 2>/dev/null)"
+    case "$_lc_now" in ''|*[!0-9]*) _lc_now=0 ;; esac
+    printf '%s %s %s\n' "$_lc_bi" "$((L3_N + 1))" "$_lc_now" \
         | atomic_write "$L3_STATE" "" 2>/dev/null \
         || log "[自愈] 丢层记账写入失败（$L3_STATE），本次仍只做这一遍"
-    log "[自愈] 丢层放行：本次开机第 $((L3_N + 1))/$L3_MAX 次"
+    printf '%s\n' "$_lc_bi" | atomic_write "$RESET_BOOT_FILE" "" 2>/dev/null \
+        || log "[自愈] 重装额度同步写入失败（$RESET_BOOT_FILE）"
+    log "[自愈] 丢层额度已记账：本次开机第 $((L3_N + 1))/$L3_MAX 次"
     return 0
 }
 
@@ -4609,6 +4645,8 @@ _l3_reset_overlay() {
     _l3_cred_delta
     _cred_backup || log "[自愈] 凭证备份失败，继续 —— bouncer_fill 会重新注册"
     ct_force_stop || { log "[自愈] 容器强停失败，放弃丢层（现场一个字节没动）"; return 1; }
+    # 【2026-11-09】强停成功才开始记账，与 full_reinstall 的 _reset_consume 同一时机
+    _l3_consume
     _overlay_umount || log "[自愈] overlay 卸载未成功，继续尝试抹除"
     rm -rf "$OVL_UPPER" "$OVL_WORK" 2>/dev/null \
         || { log "[自愈] 可写层抹除失败，放弃"; return 1; }
@@ -5889,6 +5927,18 @@ fi
 #   而 cscli metrics 同时报 60315 条、内核 nft 有 69232 个元素 —— 列表视图不可信。
 # 退出码：0=无需动作，1=动过手，其余=检查本身异常。
 if [ "${1:-}" = "--bouncer-heal" ]; then
+    # 【2026-11-09 用户定】与引导共用同一把锁（路径与 probe 的 $LOCK 一致）：
+    # 原来不拿锁，体检组正在重启容器时这里同时重启 bouncer —— 日志交错，
+    # 而且重启后很可能拉不到还没起来的 LAPI，白重启一次。
+    # 拿不到锁就退出：下发面检查不差这 10 分钟。
+    _bh_lock="/tmp/.crowdsec-lxc-bootstrap.lock"
+    if ! mkdir "$_bh_lock" 2>/dev/null; then
+        log "[bouncer] 引导进行中（持锁），本轮跳过下发面检查"
+        exit 0
+    fi
+    printf '%s\n' "$$" > "$_bh_lock/pid" 2>/dev/null
+    date +%s > "$_bh_lock/ts" 2>/dev/null
+    trap "rm -rf '$_bh_lock' 2>/dev/null" EXIT INT TERM HUP
     if ! cs_active_on_host; then
         log "[bouncer] 进程未运行（不是下发问题），交由 _ensure_bouncer_service"
         _ensure_bouncer_service
