@@ -51,7 +51,12 @@ STATE_FILE="${CS_PROBE_STATE:-/tmp/crowdsec-probe.state}"
 # 【2026-11-09 用户定】60s -> 600s。保留 last_pull / DNS 两条通道
 # （唯一能发现「防护静默失效」的手段），10 分钟延迟可接受。
 PROBE_INTERVAL="${CS_PROBE_INTERVAL:-600}"
-PROBE_STALL_ROUNDS="${CS_PROBE_STALL_ROUNDS:-3}"
+# 〔2026-11-09 用户定〕间隔 60s->600s 后，每轮就是 10 分钟；
+# 原来 3 轮 = 3 分钟确认，现在 3 轮 = 30 分钟，太慢。改成 2 轮 = 20 分钟。
+PROBE_STALL_ROUNDS="${CS_PROBE_STALL_ROUNDS:-2}"
+# last_pull 单独保留 3 轮：它触发的是完整 bootstrap（重建容器 / 重建网络，
+# 真机出现过 veth 被甩掉），误判代价太大，必须比其他通道更保守。
+PROBE_STALL_ROUNDS_PULL="${CS_PROBE_STALL_ROUNDS_PULL:-3}"
 PROBE_COOLDOWN="${CS_PROBE_COOLDOWN:-600}"
 PROBE_LOCK_STALE="${CS_PROBE_LOCK_STALE:-1800}"
 # 【2026-10-29 用户定】连续修复失败 3 次就锁存 need-human，原来是 5。
@@ -64,7 +69,9 @@ PROBE_FAIL_ALERT="${CS_PROBE_FAIL_ALERT:-3}"
 # 从 img_migrate 到 capi_release 全验一遍、一个字节都不写。last_pull 只反映
 # 「bouncer 拉得到吗」，配置被改坏但还能拉的时候它照样是绿的 —— 所以每隔
 # AUDIT_EVERY 轮做一次从头到脚的体检。0 = 关闭。
-PROBE_AUDIT_EVERY="${CS_PROBE_AUDIT_EVERY:-30}"
+# 〔2026-11-09 用户定〕30 轮 x 600s = 5 小时，太长。改成 3 轮 = 30 分钟，
+# 与改动前（30 轮 x 60s）等价。--verify-only 只读不写，单次 20~40 秒。
+PROBE_AUDIT_EVERY="${CS_PROBE_AUDIT_EVERY:-3}"
 # 【v.180.198】bouncer 下发面健康检查间隔（按轮数，默认 10 轮 = 10 分钟）。
 # 与体检同频但独立开关：体检只读（--verify-only 承诺不写），这里要重启服务。
 # 【2026-11-09 用户定】间隔拉到 600s 后，10 轮 = 100 分钟才查一次 bouncer，
@@ -800,10 +807,15 @@ probe_tick() {
     #       包被删不影响转发，开机补一次够用。last_pull / DNS 两条通道不受影响。
     # 标记放 /tmp（tmpfs，重启即清），每次开机首轮跑一次，之后直接 sleep。
     if [ ! -f /tmp/.cs-apps-kmods-once ]; then
+        # 〔2026-11-09〕只跑一轮，「连续 N 轮确认」就失效了：首轮不修就没有第二轮。
+        # 这里临时把阈值压到 1，发现即修；跑完立即还原。
+        _sr_save="$PROBE_STALL_ROUNDS"
+        PROBE_STALL_ROUNDS=1
         _apps_watch
     # 应用依赖的内核模块同理：/lib/modules 里的 .ko 被删不影响 last_pull，
     # 排在「链路正常就 return 0」后面等于永远不执行。
         _kmods_watch
+        PROBE_STALL_ROUNDS="$_sr_save"
         : > /tmp/.cs-apps-kmods-once
     fi
     # 【v.180.189】lxc 二进制的文件级判据，同样必须在此之前：
@@ -836,9 +848,9 @@ probe_tick() {
         plog "【需人工介入】已停止重跑（last_pull 仍停滞，累计第 ${P_STALL} 轮）。修好后重启探针或删除 $STATE_FILE 解除"
         return 0
     fi
-    if [ "$P_STALL" -lt "$PROBE_STALL_ROUNDS" ]; then
+    if [ "$P_STALL" -lt "$PROBE_STALL_ROUNDS_PULL" ]; then
         P_ACTION="stall-warn"
-        plog "【停滞】last_pull 停滞（第 $P_STALL/$PROBE_STALL_ROUNDS 轮）"
+        plog "【停滞】last_pull 停滞（第 $P_STALL/$PROBE_STALL_ROUNDS_PULL 轮）"
         return 0
     fi
     # 连续停滞达阈值 → 冷却检查 → 告警 + 拉起 bootstrap
@@ -851,7 +863,7 @@ probe_tick() {
     P_LAST_TRIG="$_now"
     P_STALL=0
     P_ACTION="trigger"
-    plog "【触发】last_pull 连续停滞 $PROBE_STALL_ROUNDS 轮，持锁重跑 $BOOT 复验/修复"
+    plog "【触发】last_pull 连续停滞 $PROBE_STALL_ROUNDS_PULL 轮，持锁重跑 $BOOT 复验/修复"
     _run_fix
     _rc=$?
     if [ "$_rc" = 78 ]; then
