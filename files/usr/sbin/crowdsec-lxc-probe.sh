@@ -879,7 +879,10 @@ probe_tick() {
     _now="$(date +%s)"
     if [ $((_now - ${P_LAST_TRIG:-0})) -lt "$PROBE_COOLDOWN" ]; then
         P_ACTION="cooldown"
-        plog "【冷却】last_pull 持续停滞，冷却中（剩余 $((PROBE_COOLDOWN - (_now - P_LAST_TRIG)))s），暂不触发"
+        _cl_left=$((PROBE_COOLDOWN - (_now - P_LAST_TRIG)))
+        # 直接睡到冷却结束（+5s 余量），别 60s 一轮空跑 probe-check
+        P_SLEEP_HINT=$((_cl_left + 5))
+        plog "【冷却】last_pull 持续停滞，冷却中（剩余 ${_cl_left}s），暂不触发"
         return 0
     fi
     P_LAST_TRIG="$_now"
@@ -1105,6 +1108,7 @@ _probe_load() {
 # ---- 主循环：等安装 → 每 PROBE_INTERVAL 一轮 ----
 P_STALL=0
 P_PULL_POST=0
+P_SLEEP_HINT=0
 P_LAST_TRIG=0
 P_FAIL=0
 P_LOCK_RECLAIMED=0
@@ -1151,8 +1155,14 @@ while true; do
     #   差别只是 30 分钟还是 2 分钟给出结论。
     #   P_PULL_POST：刚跑完一轮 bootstrap，下一轮强制 60s 复判；正常即清标记回 600s。
     _sleep_s="$PROBE_INTERVAL"
-    if [ "${P_UP_BAD:-0}" -gt 0 ] || [ "${P_LXC_BAD:-0}" -gt 0 ] \
-       || [ "${P_STALL:-0}" -gt 0 ] || [ "${P_PULL_POST:-0}" = "1" ]; then
+    if [ "${P_UP_BAD:-0}" -gt 0 ] || [ "${P_LXC_BAD:-0}" -gt 0 ]; then
+        _sleep_s="$PROBE_RECHECK_GAP"
+    elif [ "${P_SLEEP_HINT:-0}" -gt 0 ]; then
+        # 冷却期已算出还要等多久：直接睡到点，不必 60s 一轮空跑 probe-check
+        # （那条路每轮 2 次 lxc-attach，冷却期间拿不到任何新信息）。
+        _sleep_s="$P_SLEEP_HINT"
+        P_SLEEP_HINT=0
+    elif [ "${P_STALL:-0}" -gt 0 ] || [ "${P_PULL_POST:-0}" = "1" ]; then
         _sleep_s="$PROBE_RECHECK_GAP"
     fi
     sleep "$_sleep_s"
