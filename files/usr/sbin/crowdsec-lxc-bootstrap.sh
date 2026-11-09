@@ -5849,7 +5849,11 @@ if [ "${1:-}" = "--bouncer-heal" ]; then
     # 归零，既不依赖状态文件，也不会重启完下一轮又把同一批旧错误数一遍反复重启。
     _bh_err="$(tail -n 500 "$_BC_LOG" 2>/dev/null | awk '/Starting crowdsec-firewall-bouncer/{n=0; next} /netlink receive: /{n++} END{print n+0}')"
     case "$_bh_err" in ''|*[!0-9]*) _bh_err=0 ;; esac
-    if [ "$_bh_err" -ge 2 ]; then
+    # 【2026-11-09 用户定】阈值 2 -> 1：单次 netlink 错误即重启 bouncer。
+# 用户实测：>=2 要等约 30 分钟，>=1 约 20 分钟即可触发。
+# 兜底仍在下方：进程存活不足 CS_BOUNCER_HEAL_COOLDOWN（默认 3600s）直接跳过，
+# 所以最坏情况是每小时最多重启一次，不会被单次抖动打穿。
+if [ "$_bh_err" -ge 1 ]; then
         # 【v.180.198】重启冷却：进程存活不足 _bh_cool 秒就不动手（默认 3600）。
         # 目的：把「修不好的错误 -> 每 10 分钟重启一次」压到「最坏 1 小时 1 次」，
         # 而检查频率不变（判据仍每 10 分钟跑，健康时开销为零）。
