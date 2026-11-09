@@ -8,10 +8,12 @@
 # 定义：只要不等于 1024 / lzo 就拉回来。
 # 不做“合法就尊重”那套 —— 你要的是被改坏也不用想怎么弄回来。
 # 以后真要换大小，改本文件与 97-zram.sh 两处，刷固件生效。
+#
+# 手动验证：/etc/init.d/zram-guard start
 
 START=14
 
-boot() {
+guard() {
 	local changed=0 cur
 
 	cur="$(uci -q get system.@system[0].zram_size_mb)"
@@ -31,3 +33,6 @@ boot() {
 	[ "$changed" = "1" ] && uci commit system
 	return 0
 }
+
+boot() { guard; }
+start() { guard; }
