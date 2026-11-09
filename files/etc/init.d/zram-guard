@@ -1,0 +1,33 @@
+#!/bin/sh /etc/rc.common
+# 〔2026-11-09〕zram 配置自愈守卫
+#
+# START=14，必须早于 zram 自己的 START=15。
+# zram.init 的 start() 从 /etc/config/system 读 zram_size_mb / zram_comp_algo，
+# 所以这里提前把值摆正，zram 起来就是对的。
+#
+# 定义：只要不等于 1024 / lzo 就拉回来。
+# 不做“合法就尊重”那套 —— 你要的是被改坏也不用想怎么弄回来。
+# 以后真要换大小，改本文件与 97-zram.sh 两处，刷固件生效。
+
+START=14
+
+boot() {
+	local changed=0 cur
+
+	cur="$(uci -q get system.@system[0].zram_size_mb)"
+	if [ "$cur" != "1024" ]; then
+		uci set system.@system[0].zram_size_mb='1024'
+		changed=1
+		logger -t zram-guard "zram_size_mb='$cur' -> 1024"
+	fi
+
+	cur="$(uci -q get system.@system[0].zram_comp_algo)"
+	if [ "$cur" != "lzo" ]; then
+		uci set system.@system[0].zram_comp_algo='lzo'
+		changed=1
+		logger -t zram-guard "zram_comp_algo='$cur' -> lzo"
+	fi
+
+	[ "$changed" = "1" ] && uci commit system
+	return 0
+}
