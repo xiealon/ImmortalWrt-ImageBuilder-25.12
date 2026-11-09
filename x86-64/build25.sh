@@ -754,23 +754,28 @@ if [ -n "$_ak_skip_stale" ]; then
 fi
 
 # ---- 【2026-11-02】保护组在库核对 ----
-# pkg-restore-apps.sh 的 _PA_HONK / _PA_GEO 只负责「发现缺失」；真正装回来
+# pkg-restore-apps.sh 的 _PA_DAED / _PA_GEO 只负责「发现缺失」；真正装回来
 # 靠的是 /rom/root/apk-cache 里这份本地包库。库里没有对应 apk 的话，
 # 探针每轮报缺失、每轮修不好 —— 那不是保护，是每轮白报一次警。
 # 所以在构建期当场核对，别把空头支票留到真机。
-if echo "$PACKAGES" | grep -q "honk"; then
-    _ak_need_honk="honk luci-app-honk luci-lib-daeuniverse luci-i18n-daeuniverse-zh-cn vmlinux-btf-builtin"
-    _ak_honk_miss=""
-    for _ak_np in $_ak_need_honk; do
-        ls "$_AK_DIR"/"$_ak_np"-[0-9]*.apk >/dev/null 2>&1 || _ak_honk_miss="$_ak_honk_miss $_ak_np"
+#
+# 【2026-11-10】官方线改用 daed 后，断言改成 daed 三件套。
+# 这里只查「来自 packages/ 的第三方包」：v2ray-geoip / v2ray-geosite / ca-bundle /
+# kmod-sched-* / kmod-veth 这些是 daed 的 DEPENDS，由官方源在 make image 阶段落地，
+# 不经过 packages/ —— 把它们写进断言只会在构建期误报（25.12-honk run #13 的教训）。
+if echo "$PACKAGES" | grep -q "daed"; then
+    _ak_need_daed="daed luci-app-daede vmlinux-btf"
+    _ak_daed_miss=""
+    for _ak_np in $_ak_need_daed; do
+        ls "$_AK_DIR"/"$_ak_np"-[0-9]*.apk >/dev/null 2>&1 || _ak_daed_miss="$_ak_daed_miss $_ak_np"
     done
-    if [ -n "$_ak_honk_miss" ]; then
-        echo "::error::honk 保护组缺包，探针将无法装回：$_ak_honk_miss"
-        echo "::error::来源 A 看 packages/*.apk（CloudRunFilesBuilder 的 honk-apk Release）"
-        ls -la "$_AK_DIR" 2>/dev/null | grep -i honk || true
+    if [ -n "$_ak_daed_miss" ]; then
+        echo "::error::daed 保护组缺包，探针将无法装回：$_ak_daed_miss"
+        echo "::error::来源 A 看 packages/*.apk（kenzok8/openwrt-daede 的 Release）"
+        ls -la "$_AK_DIR" 2>/dev/null | grep -iE "daed|daede|vmlinux" || true
         exit 1
     fi
-    echo "==> [apk-cache] honk 保护组齐备（5 包）：$_ak_need_honk"
+    echo "==> [apk-cache] daed 保护组齐备（3 包）：$_ak_need_daed"
 fi
 
 # geo 两包的核对放在来源 B 之后 —— 它们来自官方源，不是 packages/。
