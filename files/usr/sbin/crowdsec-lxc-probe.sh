@@ -580,6 +580,29 @@ _apps_watch() {
         return 0
     fi
     P_APP_FIX=$((${P_APP_FIX:-0} + 1))
+    # 【2026-11-10.0525】用户定的完整节奏：
+    #   第 1 轮检测到缺失 -> 只 warn（不动作）
+    #   60s 后第 2 轮确认 -> --repair
+    #   装回成功 -> 清计数、回 600s（由 P_APP_BAD=0 自然实现）
+    #   装回失败 -> 立刻删除重建（--rebuild），不是干等下一轮
+    #   重建成功 -> 清计数、回 600s
+    #   重建也失败 -> 继续计数，PROBE_FAIL_ALERT 次后 need-human
+    # 为什么要重建：--force 走 apk fix / opkg --force-reinstall，只重铺文件
+    # 不动记账；记账坏了它会一直报成功而复判仍缺，光重试是死循环。
+    if [ "$P_APP_FIX" -eq 1 ]; then
+        P_ACTION="app-rebuild"
+        plog "【应用】装回失败（仍缺：$_aw_out2），改走删除重建"
+        _cap 180 "$_APPS_RESTORE" --rebuild >>"$BOOT_LOG" 2>&1
+        if _aw_out3="$("$_APPS_RESTORE" --check 2>&1)"; then
+            P_APP_BAD=0
+            P_APP_FIX=0
+            P_ACTION="app-rebuilt"
+            plog "【应用】删除重建成功，主程序已全部在位"
+            return 0
+        fi
+        _aw_out2="$_aw_out3"
+        plog "【应用】删除重建后仍缺：$_aw_out3"
+    fi
     if [ "$P_APP_FIX" -ge "$PROBE_FAIL_ALERT" ]; then
         P_ACTION="app-need-human"
         P_HUMAN_APP=1
