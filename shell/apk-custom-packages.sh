@@ -141,6 +141,18 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES nftables-json"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-crowdsec-firewall-bouncer"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-crowdsec-firewall-bouncer-zh-cn"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES xz tar ip-full"
+# 【2026-11-10.0420】coreutils-timeout：用户定「随固件进，并纳入 /rom 与探针保护」。
+# 缺它的后果：rc.local 6 个调用点 + bootstrap 的 run/run_svc/run_tar/ct 全部退化成
+# 看门狗模式（_run_capped 能兜，但每次多 fork 一个子 shell + 每秒轮询），
+# /etc/init.d/crowdsec-lxc-probe 第 30 行的 `timeout 60 "$_g" quiet` 直接 not found。
+# 体积：25.12.2 packages/*.apk 里 coreutils-timeout-9.9-r2.apk = 18,916 B（18.5 KB）；
+#       24.10 packages/*.ipk 里 coreutils-timeout_9.7-r1_x86_64.ipk，包名同为 coreutils-timeout。
+# 保护（两处，各防一种）：
+#   ① pkg-restore.sh 的 _DEPS_PKGS —— 探针 _kmods_watch 每轮 --deps --check，
+#      文件被删/清空时连续 PROBE_STALL_ROUNDS 轮后自动 --deps --repair 从 /rom 拷回；
+#   ② bootstrap 的 _preflight —— 每次引导开头 command -v timeout，缺了就
+#      _rom_restore_pkg coreutils-timeout 1（PCR_FORCE=1 强制重装，记账一起同步）。
+CUSTOM_PACKAGES="$CUSTOM_PACKAGES coreutils-timeout"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES kmod-veth kmod-ikconfig"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES kmod-br-netfilter"
 # acpi_call: manual EC fan-step control for Panasonic CFSV7-3 (added 2026-11-05).

@@ -1015,8 +1015,12 @@ _preflight() {
     [ -x /usr/bin/cs-firewall-bouncer ] || _pf_bad="$_pf_bad cs-firewall-bouncer"
     [ -x /etc/init.d/crowdsec-firewall-bouncer ] || _pf_bad="$_pf_bad init.d/crowdsec-firewall-bouncer"
     [ -x /usr/sbin/nft ] || _pf_bad="$_pf_bad nft"
+    # 【2026-11-10.0420】timeout 也纳进来：它不在时 _run_capped 会降级（功能不变），
+    # 但 /etc/init.d/crowdsec-lxc-probe 的 `timeout 60 guard` 与 6 处 rc.local 调用点
+    # 都要走降级路径，能装回来就不要留着降级。判据只认命令，不认包名。
+    command -v timeout >/dev/null 2>&1 || _pf_bad="$_pf_bad timeout"
     if [ -z "$_pf_bad" ]; then
-        log "[PRE] 应用在位：lxc 五件套 + crowdsec-firewall-bouncer + nft"
+        log "[PRE] 应用在位：lxc 五件套 + crowdsec-firewall-bouncer + nft + timeout"
     else
         log "[PRE] 应用缺失：$_pf_bad —— 先从只读基座按包装回"
         case "$_pf_bad" in
@@ -1028,6 +1032,10 @@ _preflight() {
         esac
         case "$_pf_bad" in
         *nft*) _rom_restore_pkg nftables-json 1 || log "[PRE] nftables-json 装回失败" ;;
+        # 【2026-11-10.0420】包级装回，不拷文件：coreutils-timeout 在包库里，
+        # apk/opkg 装出来文件与记账一起回来；传 1 = PCR_FORCE，跳过「已装就算」判定。
+        *timeout*) _rom_restore_pkg coreutils-timeout 1 \
+            || log "[PRE] coreutils-timeout 装回失败（包库不可用或固件未内置）" ;;
         esac
         hash -r 2>/dev/null || true
         # 装完复判，别把「试过了」当「好了」
@@ -1036,6 +1044,10 @@ _preflight() {
         [ -x /usr/bin/cs-firewall-bouncer ] || _pf_bad="$_pf_bad cs-firewall-bouncer"
         [ -x /etc/init.d/crowdsec-firewall-bouncer ] || _pf_bad="$_pf_bad init.d/crowdsec-firewall-bouncer"
         [ -x /usr/sbin/nft ] || _pf_bad="$_pf_bad nft"
+    # 【2026-11-10.0420】timeout 也纳进来：它不在时 _run_capped 会降级（功能不变），
+    # 但 /etc/init.d/crowdsec-lxc-probe 的 `timeout 60 guard` 与 6 处 rc.local 调用点
+    # 都要走降级路径，能装回来就不要留着降级。判据只认命令，不认包名。
+    command -v timeout >/dev/null 2>&1 || _pf_bad="$_pf_bad timeout"
         [ -z "$_pf_bad" ] || log "[PRE] 装回后仍缺：$_pf_bad"
     fi
     if verify_ct_config; then

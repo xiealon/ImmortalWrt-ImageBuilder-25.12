@@ -334,9 +334,16 @@ _DEPS_ROM_LIST="$ROMDIR/lib/apk/packages"
 # 所以那时真正会「没」的是 /usr/share/v2ray 下两个实体文件。
 # 现在走 honk，规则集由 native_api.geosite_download_url / geoip_download_url
 # 自己下到 data_dir（默认 /etc/honk/data），与这两个包无关。
+# 【2026-11-10.0420】coreutils-timeout 进表（用户定：timeout 要纳入保护）。
+# 和 kmod-* 的区别：这个包在包库里有 apk/ipk，包级装得回来；但它同时是
+# 「一条命令就够用」的东西 —— 探针走文件级能在一轮内补回，不必等引导。
+# 两条并行不冲突：探针管「文件被删」，bootstrap _preflight 管「包被 apk del」
+# （后者 apk info -e 看得见，直接 PCR_FORCE 重装、记账一起回来）。
+# 老固件没装这个包时 /rom 里没有它的 .list，本表第一行 [ -f ] 直接跳过，
+# 零动作零日志 —— 不会把「没带这个包的固件」误判成缺件。
 _DEPS_PKGS="kmod-dummy kmod-nft-socket kmod-nft-tproxy kmod-sched-bpf
 kmod-sched-core kmod-veth kmod-inet-diag kmod-tun kmod-netlink-diag kmod-zram
-ca-bundle libcap yq ip-full firewall4 coreutils-nohup libopenssl3
+ca-bundle libcap yq ip-full firewall4 coreutils-nohup coreutils-timeout libopenssl3
 v2ray-geoip v2ray-geosite"
 
 # 输出「基底有、运行侧缺或为空」的绝对路径。返回 2 = 基底里一份清单都没有。
