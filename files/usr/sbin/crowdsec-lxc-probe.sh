@@ -398,12 +398,13 @@ _up_watch() {
         P_HUMAN_UP=0
         return 0
     fi
-    P_UP_BAD=$((${P_UP_BAD:-0} + 1))
     if [ "${P_HUMAN_UP:-0}" = "1" ]; then
         P_ACTION="up-need-human-hold"
-        plog "【DNS】【需人工介入】已停止重跑（$_uw_why，累计第 ${P_UP_BAD} 轮）。修好后重启探针或删除 $STATE_FILE 解除"
+        P_UP_BAD=0
+        plog "【DNS】【需人工介入】已停止重跑（$_uw_why）。修好后重启探针或删除 $STATE_FILE 解除"
         return 0
     fi
+    P_UP_BAD=$((${P_UP_BAD:-0} + 1))
     if [ "$P_UP_BAD" -lt "$PROBE_STALL_ROUNDS" ]; then
         P_ACTION="up-warn"
         plog "【DNS】$_uw_why（第 $P_UP_BAD/$PROBE_STALL_ROUNDS 轮）"
@@ -434,10 +435,10 @@ _up_watch() {
     fi
     P_ACTION="up-repair"
     plog "【DNS】$_uw_why 连续 ${PROBE_STALL_ROUNDS} 轮，交 pkg-restore-smartdns.sh $_uw_cmd：$_uw_desc"
-    if _up_run "$_uw_cmd"; then
+    if _up_run "$_uw_cmd" && _up_svc; then
         P_UP_FIX=0
         P_ACTION="up-fixed"
-        plog "【DNS】已写回（$_uw_cmd）：下一轮复核 53 与上游条数"
+        plog "【DNS】已写回并复核通过（$_uw_cmd）：53 在听、规则文件齐"
         return 0
     fi
     P_UP_FIX=$((${P_UP_FIX:-0} + 1))
@@ -479,14 +480,15 @@ _apps_watch() {
     # 2 = 判断不了（opkg/apk 都不在，或脚本自己跑不起来）。不计数、不动作 ——
     # 跟「缺了」是两件事，混在一起会在老固件上刷满假告警。
     [ "$_aw_rc" = "1" ] || return 0
-    P_APP_BAD=$((${P_APP_BAD:-0} + 1))
     # 达到失败阈值后停手。理由同补印链路：重跑同一套装包换不来新结果，
     # 而每轮都跑一次 opkg --force-reinstall 是实打实刷 flash。
     if [ "${P_HUMAN_APP:-0}" = "1" ]; then
         P_ACTION="app-need-human-hold"
-        plog "【应用】【需人工介入】已停止装回（$_aw_out，累计第 $P_APP_BAD 轮）。修好后重启探针或删除 $STATE_FILE 解除"
+        P_APP_BAD=0
+        plog "【应用】【需人工介入】已停止装回（$_aw_out）。修好后重启探针或删除 $STATE_FILE 解除"
         return 0
     fi
+    P_APP_BAD=$((${P_APP_BAD:-0} + 1))
     if [ "$P_APP_BAD" -lt "$PROBE_STALL_ROUNDS" ]; then
         P_ACTION="app-warn"
         plog "【应用】主程序缺失：$_aw_out（第 $P_APP_BAD/$PROBE_STALL_ROUNDS 轮）"
@@ -561,12 +563,13 @@ _kmods_watch() {
         fi
         return 0
     fi
-    P_KMOD_BAD=$((${P_KMOD_BAD:-0} + 1))
     if [ "${P_HUMAN_KMOD:-0}" = "1" ]; then
         P_ACTION="kmods-need-human-hold"
-        plog "【依赖文件】【需人工介入】已停止补回（$_kd_out，累计第 $P_KMOD_BAD 轮）。修好后重启探针或删除 $STATE_FILE 解除"
+        P_KMOD_BAD=0
+        plog "【依赖文件】【需人工介入】已停止补回（$_kd_out）。修好后重启探针或删除 $STATE_FILE 解除"
         return 0
     fi
+    P_KMOD_BAD=$((${P_KMOD_BAD:-0} + 1))
     if [ "$P_KMOD_BAD" -lt "$PROBE_STALL_ROUNDS" ]; then
         P_ACTION="kmods-warn"
         plog "【依赖文件】缺失：$_kd_out（第 $P_KMOD_BAD/$PROBE_STALL_ROUNDS 轮）"
@@ -639,12 +642,13 @@ _lxc_watch() {
         fi
         return 0
     fi
-    P_LXC_BAD=$((${P_LXC_BAD:-0} + 1))
     if [ "${P_HUMAN_LXC:-0}" = "1" ]; then
         P_ACTION="lxc-need-human-hold"
-        plog "【lxc 文件】【需人工介入】已停止装回（$_lw_out，累计第 $P_LXC_BAD 轮）。修好后重启探针或删除 $STATE_FILE 解除"
+        P_LXC_BAD=0
+        plog "【lxc 文件】【需人工介入】已停止装回（$_lw_out）。修好后重启探针或删除 $STATE_FILE 解除"
         return 0
     fi
+    P_LXC_BAD=$((${P_LXC_BAD:-0} + 1))
     if [ "$P_LXC_BAD" -lt "$PROBE_STALL_ROUNDS" ]; then
         P_ACTION="lxc-warn"
         plog "【lxc 文件】二进制缺失：$_lw_out（第 $P_LXC_BAD/$PROBE_STALL_ROUNDS 轮）"
