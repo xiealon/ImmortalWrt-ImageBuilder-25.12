@@ -222,7 +222,12 @@ ct() {
     if [ "${_CT_BOOT_UNTIL:-0}" -gt 0 ] && [ "$(date +%s)" -lt "$_CT_BOOT_UNTIL" ]; then
         _ct_to="$CT_TIMEOUT_BOOT"
     fi
-    timeout "$_ct_to" lxc-attach -P "$LXC_PATH" -n "$LXC_NAME" -- "$@"
+    # 【2026-11-10.0315】第四条硬依赖 timeout 的位置（前三处是 run/run_svc/run_tar）。
+    # 真机实测 line 225: timeout: not found → rc=127，于是每一处 ct / _ct_env
+    # 都变成「立刻 127 失败」，PREP 的容器网络探针、LOGCONF、LAPI、enroll 全受影响。
+    # _run_capped 定义在下方（第 246 行后），但 shell 函数是调用期求值，
+    # 所有 ct 调用都发生在主流程（文件末尾），定义顺序不构成问题。
+    _run_capped "$_ct_to" lxc-attach -P "$LXC_PATH" -n "$LXC_NAME" -- "$@"
 }
 
 # 【v.108.66】宿主侧外部命令统一超时（A 方案：分三档，不搞一刀切）
