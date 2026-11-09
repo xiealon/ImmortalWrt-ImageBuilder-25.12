@@ -14,8 +14,8 @@
 # 判定标准单一事实源：`$BOOT --probe-check`（bootstrap 入口，复用 bouncer_pulling
 #   60s 新鲜度 = 6 个 10s 心跳周期），探针不自己解析 last_pull，两边标准永不打架。
 # 参数（环境变量覆盖，与 bootstrap 的 CS_BOOTSTRAP_* 同风格）：
-#   CS_PROBE_INTERVAL     一轮间隔秒（默认 60）
-#   CS_PROBE_STALL_ROUNDS 连续停滞几轮才动作（默认 3，防容器刚起的拉取周期误报）
+#   CS_PROBE_INTERVAL     一轮间隔秒（默认 600；待确认时压到 CS_PROBE_RECHECK_GAP）
+#   CS_PROBE_STALL_ROUNDS 连续停滞几轮才动作（默认 2，防容器刚起的拉取周期误报）
 #   CS_PROBE_COOLDOWN     触发后冷却秒（默认 600，防爆冲）
 #   CS_PROBE_LOCK_STALE   锁最长存活秒（默认 1800），超过视为陈旧锁回收
 #   CS_PROBE_FAIL_ALERT   连续修复失败几次后报「需人工介入」（默认 3）
@@ -1088,6 +1088,14 @@ while true; do
         _sleep_s="$P_SLEEP_HINT"
         P_SLEEP_HINT=0
     elif [ "${P_STALL:-0}" -gt 0 ] || [ "${P_PULL_POST:-0}" = "1" ]; then
+        _sleep_s="$PROBE_RECHECK_GAP"
+    elif [ "${P_KMOD_BAD:-0}" -gt 0 ]; then
+        # 【2026-11-10.0422】依赖文件通道（pkg-restore 的 _DEPS_PKGS）也进加速。
+        # 原来它只在 600s 一轮里推进：2 轮 = 20 分钟才轮到 --deps --repair，
+        # 而 last_pull 那套早就把同一件事论证清楚了 —— 判定次数不变、阈值不变，
+        # 只是把两次确认的间隔从 600s 压到 60s，结论从 20 分钟缩到 2 分钟。
+        # 文件被删和 DNS 中断是同类「待确认」，没理由两套节奏。
+        # 代价：每轮多一次 --deps --check（只读包内清单 + [ -e ]，实测约 6 ms）。
         _sleep_s="$PROBE_RECHECK_GAP"
     fi
     sleep "$_sleep_s"
