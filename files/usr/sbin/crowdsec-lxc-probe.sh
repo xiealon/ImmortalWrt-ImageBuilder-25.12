@@ -863,7 +863,11 @@ probe_tick() {
     # 解除方式与补印分支一致：修好后重启探针、或删掉 $STATE_FILE。
     if [ "${P_HUMAN_PULL:-0}" = "1" ]; then
         P_ACTION="need-human-hold"
-        plog "【需人工介入】已停止重跑（last_pull 仍停滞，累计第 ${P_STALL} 轮）。修好后重启探针或删除 $STATE_FILE 解除"
+        # 锁存即停手：P_STALL 留在原地会让主循环永远走 60s 快节奏，
+        # 每 60 秒白跑一次 _boot --probe-check（2 次 lxc-attach）。
+        P_STALL=0
+        P_PULL_POST=0
+        plog "【需人工介入】已停止重跑（last_pull 仍停滞）。修好后重启探针或删除 $STATE_FILE 解除"
         return 0
     fi
     if [ "$P_STALL" -lt "$PROBE_STALL_ROUNDS_PULL" ]; then
