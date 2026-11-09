@@ -1169,13 +1169,21 @@ while true; do
         P_SLEEP_HINT=0
     elif [ "${P_STALL:-0}" -gt 0 ] || [ "${P_PULL_POST:-0}" = "1" ]; then
         _sleep_s="$PROBE_RECHECK_GAP"
-    elif [ "${P_KMOD_BAD:-0}" -gt 0 ]; then
+    elif [ "${P_KMOD_BAD:-0}" -gt 0 ] || [ "${P_APP_BAD:-0}" -gt 0 ]; then
         # 【2026-11-10.0422】依赖文件通道（pkg-restore 的 _DEPS_PKGS）也进加速。
         # 原来它只在 600s 一轮里推进：2 轮 = 20 分钟才轮到 --deps --repair，
         # 而 last_pull 那套早就把同一件事论证清楚了 —— 判定次数不变、阈值不变，
         # 只是把两次确认的间隔从 600s 压到 60s，结论从 20 分钟缩到 2 分钟。
         # 文件被删和 DNS 中断是同类「待确认」，没理由两套节奏。
         # 代价：每轮多一次 --deps --check（只读包内清单 + [ -e ]，实测约 6 ms）。
+        #
+        # 【2026-11-10.0522】应用主程序通道（P_APP_BAD）一并进加速。
+        # 它和 P_KMOD_BAD 是同一个病 —— 都是「文件被删」，只是一个盯主程序、
+        # 一个盯 kmod/依赖库/geo 数据，没理由一个 60s 一个 600s。
+        # 用户原话：「两轮就是 20 分钟」，要的是【第 1 轮发现 → 60s 后第 2 轮
+        # 复判 → 正常清计数退出 / 异常才动手】这个节奏，不是等满 10 分钟。
+        # 注意：判定次数仍是 PROBE_STALL_ROUNDS=2（连续 2 轮确认才修），
+        # 加速压的只是两次确认的间隔，不是把 2 次降成 1 次。
         _sleep_s="$PROBE_RECHECK_GAP"
     fi
     sleep "$_sleep_s"
