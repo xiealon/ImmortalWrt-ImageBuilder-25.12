@@ -48,7 +48,9 @@ ROOTFS="${CS_ROOTFS:-$LXC_PATH/$LXC_NAME/rootfs}"
 # 探针自己的运行状态（跨轮/跨重启持久：停滞轮数、上次触发、连续失败次数）
 STATE_FILE="${CS_PROBE_STATE:-/tmp/crowdsec-probe.state}"
 
-PROBE_INTERVAL="${CS_PROBE_INTERVAL:-60}"
+# 【2026-11-09 用户定】60s -> 600s。保留 last_pull / DNS 两条通道
+# （唯一能发现「防护静默失效」的手段），10 分钟延迟可接受。
+PROBE_INTERVAL="${CS_PROBE_INTERVAL:-600}"
 PROBE_STALL_ROUNDS="${CS_PROBE_STALL_ROUNDS:-3}"
 PROBE_COOLDOWN="${CS_PROBE_COOLDOWN:-600}"
 PROBE_LOCK_STALE="${CS_PROBE_LOCK_STALE:-1800}"
@@ -65,7 +67,9 @@ PROBE_FAIL_ALERT="${CS_PROBE_FAIL_ALERT:-3}"
 PROBE_AUDIT_EVERY="${CS_PROBE_AUDIT_EVERY:-30}"
 # 【v.180.198】bouncer 下发面健康检查间隔（按轮数，默认 10 轮 = 10 分钟）。
 # 与体检同频但独立开关：体检只读（--verify-only 承诺不写），这里要重启服务。
-PROBE_HEAL_EVERY="${CS_PROBE_HEAL_EVERY:-10}"
+# 【2026-11-09 用户定】间隔拉到 600s 后，10 轮 = 100 分钟才查一次 bouncer，
+# 比原来（60s x 10 = 10 分钟）慢 10 倍。改成 1 轮 = 每 10 分钟一次，与改动前等价。
+PROBE_HEAL_EVERY="${CS_PROBE_HEAL_EVERY:-1}"
 # 【v.108.67 设上限 / v.108.68 分档】bootstrap 内部每条宿主命令都有上限（v.108.66），
 # 但「节点数 × 10s」没有上界；probe 是常驻进程，卡在 wait 上不退 = procd 不 respawn
 # = 监视链路静默停摆（本文件里最像「看起来在跑、其实什么都没做」的一处）。
@@ -791,10 +795,17 @@ probe_tick() {
     _up_watch
     # 应用主程序通道同样必须排在 last_pull 判定之前：应用被删不影响 last_pull，
     # 放在「链路正常就 return 0」后面等于永远不执行 —— v.180.117 在 DNS 上踩过这一脚。
-    _apps_watch
+    # 【2026-11-09 用户定】应用包与内核模块改为「每次开机只跑一次」，不再每轮扫。
+    # 依据：探针已跑 156 轮，appbad / kmodbad 全为 0，一次修复都没触发过；
+    #       包被删不影响转发，开机补一次够用。last_pull / DNS 两条通道不受影响。
+    # 标记放 /tmp（tmpfs，重启即清），每次开机首轮跑一次，之后直接 sleep。
+    if [ ! -f /tmp/.cs-apps-kmods-once ]; then
+        _apps_watch
     # 应用依赖的内核模块同理：/lib/modules 里的 .ko 被删不影响 last_pull，
     # 排在「链路正常就 return 0」后面等于永远不执行。
-    _kmods_watch
+        _kmods_watch
+        : > /tmp/.cs-apps-kmods-once
+    fi
     # 【v.180.189】lxc 二进制的文件级判据，同样必须在此之前：
     # 删掉 /usr/bin/lxc-snapshot 不影响 last_pull，排在后面等于永远不执行。
     _lxc_watch
@@ -1090,6 +1101,10 @@ while true; do
     _guard_run
     probe_tick
     _probe_save
-    _pkgcache_probe
+    # 【2026-11-09 用户定】包缓存体检也归到「每次开机只跑一次」，与应用包同频。
+    if [ ! -f /tmp/.cs-pkgcache-once ]; then
+        _pkgcache_probe
+        : > /tmp/.cs-pkgcache-once
+    fi
     sleep "$PROBE_INTERVAL"
 done
