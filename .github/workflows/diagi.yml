@@ -1,0 +1,236 @@
+name: diagI
+
+on:
+  workflow_dispatch:
+    inputs:
+      # 【官方源线】这三档直接决定官方 ImageBuilder 镜像 tag：
+      #   immortalwrt/imagebuilder:x86-64-openwrt-25.12.0 / 25.12.1 / 25.12.2
+      # 内核和工具链都跟着镜像走，不是本仓编译的 —— 选哪档就出哪档的镜像。
+      # （eBPF 代理要 DYNAMIC_FTRACE + BTF：自建线用自建内核，见 25.12-honk 仓；
+      #   本线靠随包的 vmlinux-btf 补 BTF，DYNAMIC_FTRACE 随官方镜像走、不做断言。）
+      Luci Version:
+        description: "选择 luci 版本（决定官方 ImageBuilder 镜像 tag）"
+        required: false
+        default: "25.12.2"
+        type: choice
+        options:
+          - 25.12.0
+          - 25.12.1
+          - 25.12.2
+      Router IP:
+        description: "请设置路由器的管理地址(仅对多网口路由器有效) 格式:192.168.x.1 或 10.x.x.1"
+        required: true
+        default: "192.168.1.201"
+      Router Netmask:
+        description: "子网掩码，留空默认 255.255.255.0。非 /24 时必须在下面显式填网关"
+        required: false
+      Router Gateway:
+        description: "网关地址，留空则自动取管理地址同网段的首个地址(如 192.168.100.1)。非 /24 网段请务必手填"
+        required: false
+        default: "192.168.1.1"
+      Router DNS:
+        description: "DNS 地址，留空则跟随网关"
+        required: false
+      # 【v.108.46】原来的 Container IP / Bridge IP 两个输入已删除，原因是它们制造了
+      # 两份真相：「编译期常量」和「写进固件的 custom_*_ip.txt」。容器内的网络配置文件
+      # 由 bootstrap 每轮按其中一份重写，于是那个文件既说不清谁是准的、也进不了 guard
+      # （进去了就是 bootstrap 写、guard 盖回，每 60 秒一轮）。
+      # 现在固定为 10.1.0.10 / 10.1.0.1，唯一来源是 rootfs-skel/etc/crowdsec-net.conf：
+      #   · prepare 用它装进容器镜像（tarball）
+      #   · build24/25.sh 把同一个文件拷进固件，成为 /rom 只读基准
+      #   · crowdsec-guard 逐字节比对，被改坏 60 秒内复原
+      # 要换网段：改 rootfs-skel/etc/crowdsec-net.conf 后重新构建，不要指望这里能填。
+      # DNS 同样固定为网桥 IP（容器查路由器 dnsmasq，上游 DNS 由路由器自己跟）。
+      # 历史：曾经下拉框只有 2G/3G/4G，白名单里却写着 10G ——
+      # 选 10G 能过白名单，但 ROOTFS_SIZE 的 case 没有对应分支，直接
+      # "未知 profile=10G" exit 1。那是映射漏了一段，不是磁盘问题。
+      # 教训：下拉框 / 白名单 / 映射 这三处必须永远一起改，只改一处就是埋雷。
+      # 注意「分区大小」和「固件大小」是两件事：img 里未使用的空间全是零，
+      # gzip 压完仍然只有几百 MB，224G 分区出的固件也能正常下载/刷写。
+      # 档位语义（重要）：2G~8G 那批「裸分区」档已经放弃，改成「你的盘多大就选多大」。
+      # 没有例外档：12G 已删，现在每个档位都对应一块真实存在、且装得下的硬盘。
+      # 注意 default 必须同步改成选项内的值 —— 否则 workflow_dispatch 会因为
+      # 默认值不在 options 里直接报错，连页面都打不开。
+      # 【大容量档：按「硬盘标称」选，根分区不是标称值】
+      # 32G/64G/128G/256G 四档照硬盘规格给，rootfs 已经替你扣掉两样东西：
+      #   1) 厂商标称按 10^9 算，换算成 GiB 要乘 0.9313：
+      #      32G→29.8GiB、64G→59.6GiB、128G→119.2GiB、256G→238.4GiB
+      #      （实际盘还会再小几百 MB，杂牌 U 盘更明显）
+      #   2) 预留 swap：32G 档留 6G，64G/128G/256G 各留 8G。
+      #      注意 swap 要你自己在设备上建（分区或 swapfile），固件不代劳。
+      # 最后再留 1.5~6G 给分区表 / EFI / kernel / 四舍五入。折算结果：
+      #      32G  盘 → rootfs 22G（22528）   22 + 6 swap = 28，余 ~1.8G
+      #      64G  盘 → rootfs 50G（51200）   50 + 8 swap = 58，余 ~1.6G
+      #      128G 盘 → rootfs 108G（110592） 108 + 8 swap = 116，余 ~3.2G
+      #      256G 盘 → rootfs 224G（229376） 224 + 8 swap = 232，余 ~6.4G
+      # 【小盘档：8G / 16G 按硬盘标称，rootfs 都留了余量】
+      #   8G  盘 7.45GiB → rootfs 4G（4096），余 3.4G 给分区表 / EFI / 2~3G swap
+      #   16G 盘 14.9GiB → rootfs 10G（10240），余 4.9G 给分区表 / EFI / 4G swap
+      # 两档都不是压线：16G 盘装 10G rootfs 还剩 4.9G，够放 4G swap 加分区表；
+      # 8G 盘装 4G rootfs 还剩 3.4G。
+      # 【10G / 12G / 20G 已删】10G 盘 9.3GiB、12G 盘 11.2GiB、20G 盘 18.6GiB，
+      #      都装不下同名的 rootfs（12GiB 的 rootfs 塞不进 11.2GiB 的盘），
+      #      留着就是「选了就变砖」的选项。
+      Profile:
+        description: '格式「硬盘标称→rootfs 分区」。左边是你手上那块盘的标称容量（非实际容量，实际约标称×0.93，还要扣分区表/EFI 和预留 swap）；右边才是固件真正建出来的 rootfs 大小'
+        required: true
+        type: choice
+        default: '16G盘→rootfs 10G'
+        options:
+          - '8G盘→rootfs 4G'
+          - '16G盘→rootfs 10G'
+          - '32G盘→rootfs 22G'
+          - '64G盘→rootfs 50G'
+          - '128G盘→rootfs 108G'
+          - '256G盘→rootfs 224G'
+      Enable Store:
+        description: "集成 store 商店"
+        required: false
+        type: boolean
+        default: true
+      # 【v.107.7】原来这里有个 Include Crowdsec=yes/no 开关，已删除。
+      # 容器是固件的一部分，不是可选件。留开关的后果：选 no 时 185MB 镜像不进固件，
+      # 而 Router IP / 掩码 / 网关 / DNS 照样写进 custom/*.txt、由开机引导的
+      # PREP 组消费 —— 用户填了地址却不生效，固件停在默认 192.168.1.1，
+      # 日志里只有一行「无镜像且无 rootfs」，看不出根因。锁死，不给这个组合留门。
+      Crowdsec Enroll Key:
+        description: "CrowdSec 控制台注册密钥（app.crowdsec.net 的 enrollment key）；留空则只跑本地 bouncer/LAPI，不开通控制台账号绑定"
+        required: false
+        default: ''
+        type: string
+        
+permissions:
+  contents: write
+
+# 两个 workflow 都往固定 tag（Autobuild-x86-64）发资产，同时跑就是互相覆盖成半成品。
+# 串行化同一条流水线（不取消进行中的），避免 A 的产物被 B 覆盖。
+concurrency:
+  # 两个 workflow 都往固定 tag（Autobuild-x86-64）发资产。原来 group 里带了
+  # ${{ github.workflow }}，导致 24.10 与 25.12 属于两个不同的组 —— 注释说「串行化」，
+  # 实际却是并行，双方互相覆盖同一个 Release 的资产。这里去掉 workflow 名与 ref，
+  # 让整条 x86-64 流水线共用一个组，真正排队执行。
+  group: g-diagI
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # 官方 immortalwrt/imagebuilder 镜像基于 Ubuntu 22.04，跑在 22.04 runner 上最省事。
+    # 注意：official 镜像的内核未逐项开 CONFIG_DYNAMIC_FTRACE 那组，eBPF 代理
+    # （honk / daed）可能装得上但挂不上钩 —— 本线只做「官方源 + 常规加固」，
+    # 装了 daed 三件套并把 vmlinux-btf 与内核版本对齐（6.12.103），BTF 这关是过的；
+    # 要百分百确定 fentry/fexit 可用，请走 25.12-honk 仓（自建内核、逐项断言）。
+    runs-on: ubuntu-22.04
+    # 【CrowdSec 版本】留空 = 跟随 packagecloud 最新：CloudRunFilesBuilder 的 crowdsec-lxc 分支每周按最新重建一次，
+    # 本构建直接取它的产物，不再做版本比对（镜像「内容是否同一份代码」仍由指纹严格保证）。
+    # 想临时钉死某版：这里改成 "1.8.1" 这类版本号，并把 build-lxc-tarball.yml 的同一行改成一致。
+    # 注意「跟最新」的代价：主仓代码不动，上游 crowdsec 升级也会悄悄进入固件，
+    # 所以下面会把实际用到的版本写进 Release 说明（router-info.md），保证可回溯。
+    env:
+      CROWDSEC_VERSION: ""
+    # docker run / git clone 卡住会吃满 6 小时默认上限，显式收口。
+    # 120 -> 180：大档位不是「产物变大」，是压缩器要把整个分区的逻辑字节读一遍。
+    # 本支用 libdeflate-gzip，零数据实测比 zlib 快 2~3 倍，224G 单遍约 10~15 分钟，
+    # 两遍 20~30 分钟；但仍与 24.10 保持同一上限，免得两个仓库的窗口不一致。
+    timeout-minutes: 180
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Set Executable Permissions
+        run: chmod +x ${{ github.workspace }}/x86-64/build25.sh
+
+      # 先把 runner 自带、本构建完全用不到的工具链删掉。
+      # 实测 GitHub 托管 runner 是 146G 盘（不是文档里说的 14G），清完剩 109G 可用，
+      # 所以下面几步不是「抢救几个 G」，是给两遍 make image 的中间产物留余量。
+      # 注意：20G 档失败的真因不是磁盘，是 Image/pad-to 里 dd bs=$(2) 会按分区大小
+      # 预分配整块内存（20G 档 = 20GiB 缓冲）直接 OOM —— 那一段由 build 脚本
+      # 打成 bs=1M + truncate，跟这里的清理是两件事，别把账算混。
+      - name: Free Disk Space
+        run: |
+          echo "== 清理前 ==" && df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost /opt/hostedtoolcache 2>/dev/null || true
+          sudo apt-get clean || true
+          echo "== 清理后 ==" && df -h /
+
+      - name: Validate Crowdsec Build Parameters
+        env:
+          CS_KEY: ${{ inputs['Crowdsec Enroll Key'] }}
+          CS_PROFILE: ${{ inputs['Profile'] }}
+        run: |
+          # 【v.108.46】容器 IP / 网桥 IP / DNS 已固定，不再从输入取。
+          # 唯一来源 rootfs-skel/etc/crowdsec-net.conf，这里只做「读得到、能解析」的自检。
+          NET_CONF="${{ github.workspace }}/rootfs-skel/etc/crowdsec-net.conf"
+          [ -s "$NET_CONF" ] || { echo "::error::缺 rootfs-skel/etc/crowdsec-net.conf（容器 IP 的唯一来源）"; exit 1; }
+          CS_CT_IP=$(sed -n 's/^ADDRESS=\([0-9][0-9.]*\)\/[0-9][0-9]*$/\1/p' "$NET_CONF" | head -n1)
+          CS_BRIDGE_IP=$(sed -n 's/^GATEWAY=//p' "$NET_CONF" | head -n1)
+          [ -n "$CS_CT_IP" ] && [ -n "$CS_BRIDGE_IP" ] \
+              || { echo "::error::net.conf 解析不出 ADDRESS/GATEWAY（格式：ADDRESS=x.y.z.w/24 与 GATEWAY=x.y.z.w）"; exit 1; }
+          echo "CS_CT_IP=$CS_CT_IP"         >> $GITHUB_ENV
+          echo "CS_BRIDGE_IP=$CS_BRIDGE_IP" >> $GITHUB_ENV
+          echo "容器网络（固定值，来自 rootfs-skel）: IP=$CS_CT_IP 网关/DNS=$CS_BRIDGE_IP 掩码=255.255.255.0"
+          echo "::notice::容器 IP/网关/DNS 固定为 $CS_CT_IP / $CS_BRIDGE_IP；要改请改 rootfs-skel/etc/crowdsec-net.conf 并重新构建"
+
+          # 档位只认下面白名单里的值。传了别的（旧脚本、API 调用、手敲）一律失败，
+          # 不要「自动纠正」到最接近的档 —— 那样出来的固件和填的对不上，比报错更难查。
+          # 注意：Profile 的选项文本是「8G盘→rootfs 4G」这种自带标注的串，
+          # 所以这里一律用前缀匹配（8G盘*）。若改成精确匹配，以后动一下标注文案就全线报错。
+          case "$CS_PROFILE" in
+            8G盘*|16G盘*|32G盘*|64G盘*|128G盘*|256G盘*) ;;
+            *)
+              echo "::error::Profile=$CS_PROFILE 不合法：只支持 8G盘/16G盘/32G盘/64G盘/128G盘/256G盘，请重选后重跑"
+              exit 1
+              ;;
+          esac
+
+          CS_ENROLL=no
+          if [ -n "$CS_KEY" ]; then
+            CS_ENROLL=yes
+            echo "✅ 已提供注册密钥，将开通控制台账号绑定"
+          else
+            echo "✅ 未提供注册密钥，跳过账号绑定（本地 bouncer/LAPI 功能不受影响）"
+          fi
+
+          if [ "$CS_ENROLL" = "yes" ]; then
+            CUSTOM="${{ github.workspace }}/custom"
+            mkdir -p "$CUSTOM"
+            printf '%s\n' "$CS_KEY" > "$CUSTOM/crowdsec_enroll_key.txt"
+            echo "已写入注册密钥 → custom/crowdsec_enroll_key.txt"
+          fi
+
+          CUSTOM="${{ github.workspace }}/custom"
+          mkdir -p "$CUSTOM"
+          echo "CS_ENROLL=$CS_ENROLL" >> $GITHUB_ENV
+          echo "校验结果: CS_ENROLL=$CS_ENROLL（容器恒内置，无开关）"
+
+      - name: Save Router Network Config Into OpenWrt Files
+        env:
+          # 走 env 中转：把用户输入直接内插进 run: 时，${{ }} 会先被当作脚本片段展开，
+          # 值里带双引号 / $( ) / ; 就等于一次命令注入。
+          IN_IP: ${{ github.event.inputs['Router IP'] }}
+          IN_NETMASK: ${{ github.event.inputs['Router Netmask'] }}
+          IN_GATEWAY: ${{ github.event.inputs['Router Gateway'] }}
+          IN_DNS: ${{ github.event.inputs['Router DNS'] }}
+        run: |
+          CUSTOM="${{ github.workspace }}/custom"
+          mkdir -p "$CUSTOM"
+
+          printf '%s\n' "$IN_IP"      > "$CUSTOM/custom_router_ip.txt"
+          printf '%s\n' "$IN_NETMASK" > "$CUSTOM/custom_router_netmask.txt"
+          printf '%s\n' "$IN_GATEWAY" > "$CUSTOM/custom_router_gateway.txt"
+          printf '%s\n' "$IN_DNS"     > "$CUSTOM/custom_router_dns.txt"
+
+          echo "已写入: IP=$(cat "$CUSTOM/custom_router_ip.txt")"
+          echo "        掩码=[$(tr -d '\r\n' < "$CUSTOM/custom_router_netmask.txt")]"
+          echo "        网关=[$(tr -d '\r\n' < "$CUSTOM/custom_router_gateway.txt")]"
+          echo "        DNS=[$(tr -d '\r\n' < "$CUSTOM/custom_router_dns.txt")]"
+
+
+      - name: Enable Store Integration
+        run: |
+          if [ "${{ github.event.inputs['Enable Store'] }}" == "true" ]; then
+            echo 'CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-store"' >> shell/apk-custom-packages.sh
+            echo "✅ 已追加 luci-app-store"
+          else
+            echo "❎ 未启用 luci-app-store"
+          fi
