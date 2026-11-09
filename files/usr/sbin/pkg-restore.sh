@@ -51,7 +51,12 @@ _pr_installed() {
 }
 
 # 记账说已装、文件却不在的情形（手删二进制，包仍在册）。
-#   判据只覆盖「可执行 / init / 共享库」这几类 —— 它们缺了包一定跑不起来；
+#   判据覆盖「可执行 / init / 共享库」五类 —— 它们缺了包一定跑不起来；
+#   另加 lxc 专有四类 /sbin、/etc/lxc、/usr/share/lxc、/usr/lib/lxc：
+#   /sbin/init.lxc 是容器 PID1，缺了 lxc-start 报 Failed to exec、容器起不来，
+#   而它落在前五类之外 —— 冒烟与旧清单都判不出（2026-11-09 真机确认）。
+#   /sbin/* 共 58 条（init / procd / netifd / uci / fw4 …）、/etc/lxc/* 3 条、
+#   /usr/share/lxc/* 18 条，全部在位；这些是系统核心与包内数据，缺了该重装。
 #   /usr/share、/etc/config 一律不看：conffiles 允许用户改动，缺失不等于包坏，
 #   拿它当判据会把「用户改过配置」误判成「包坏了」，每轮重装一次、刷 flash。
 #   工具：opkg 的安装清单 /rom/usr/lib/opkg/info/<pkg>.list 是文本，逐行可读；
@@ -73,6 +78,8 @@ _pr_files_ok() {
     while IFS= read -r _pfo_f; do
         case "$_pfo_f" in
             /usr/bin/*|/usr/sbin/*|/etc/init.d/*|/lib/*.so*|/usr/lib/*.so*) ;;
+            # 【2026-11-09】lxc 专有四类：PID1 与配置模板，前一分支看不见。
+            /sbin/*|/etc/lxc/*|/usr/share/lxc/*|/usr/lib/lxc/*) ;;
             *) continue ;;
         esac
         [ -e "$PKGROOT$_pfo_f" ] || return 1
