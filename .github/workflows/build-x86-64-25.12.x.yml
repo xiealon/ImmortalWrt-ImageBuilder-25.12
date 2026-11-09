@@ -6,7 +6,8 @@ on:
       # 【官方源线】这三档直接决定官方 ImageBuilder 镜像 tag：
       #   immortalwrt/imagebuilder:x86-64-openwrt-25.12.0 / 25.12.1 / 25.12.2
       # 内核和工具链都跟着镜像走，不是本仓编译的 —— 选哪档就出哪档的镜像。
-      # （要能跑 honk 得用带 DYNAMIC_FTRACE + BTF 的自建内核，见 25.12-honk 仓。）
+      # 代价是内核的 DYNAMIC_FTRACE 那组随上游走；BTF 由 vmlinux-btf 包补。
+      #   本线靠随包的 vmlinux-btf 补 BTF，DYNAMIC_FTRACE 随官方镜像走、不做断言。）
       Luci Version:
         description: "选择 luci 版本（决定官方 ImageBuilder 镜像 tag）"
         required: false
@@ -114,8 +115,10 @@ concurrency:
 jobs:
   build:
     # 官方 immortalwrt/imagebuilder 镜像基于 Ubuntu 22.04，跑在 22.04 runner 上最省事。
-    # 注意：官方镜像的内核没有 CONFIG_DYNAMIC_FTRACE，honk 装得上但起不来 ——
-    # 本线只做「官方源 + 常规加固」，要 honk 请走 25.12-honk 仓（自建内核）。
+    # 注意：official 镜像的内核未逐项开 CONFIG_DYNAMIC_FTRACE 那组，eBPF 代理
+    # （honk / daed）可能装得上但挂不上钩 —— 本线只做「官方源 + 常规加固」，
+    # 装了 daed 三件套并把 vmlinux-btf 与内核版本对齐（6.12.103），BTF 这关是过的；
+    # 要百分百确定 fentry/fexit 可用，请走 25.12-honk 仓（自建内核、逐项断言）。
     runs-on: ubuntu-22.04
     # 【CrowdSec 版本】留空 = 跟随 packagecloud 最新：CloudRunFilesBuilder 的 crowdsec-lxc 分支每周按最新重建一次，
     # 本构建直接取它的产物，不再做版本比对（镜像「内容是否同一份代码」仍由指纹严格保证）。
