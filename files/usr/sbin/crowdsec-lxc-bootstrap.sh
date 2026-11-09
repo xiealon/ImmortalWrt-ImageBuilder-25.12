@@ -4386,7 +4386,7 @@ _cred_keep_save() {
 # 只认这几句明确报错，不用 console status 的 not registered —— 刚 register、还没
 # enroll 时它同样是 not registered，拿它判死会把好凭据删掉，反而退化成重注册。
 _capi_cred_rejected() {
-    # 【v.108.65】加 timeout 10：这条要问一次中央 API，网络坏但没断时 cscli 会一直等
+    # 【v.108.65】加 timeout（v.108.70 起 8s）：这条要问一次中央 API，网络坏但没断时 cscli 会一直等
     # TCP 超时（分钟级），而调用它的 re_enroll 全程持着引导锁 —— 探针的 tick 会被
     # lock-busy 挡到 PROBE_LOCK_STALE（1800s）才回收，等于保护链路停摆半小时。
     # 超时返回 124、输出为空 → 下面的 grep 不匹配 → return 1（不删凭据），方向是安全的。
@@ -5042,7 +5042,7 @@ re_enroll() {
     # 挂住的代价是引导锁不放 + 探针 tick 全被挡。
     # 5s 的依据：① 走到这里说明 _wait_capi_net 已确认 api.crowdsec.net 可解析；
     # ② 注册是 POST，云端 5s 不答再等也不会有结果，只会继续占着锁。
-    # 其余几条（console status / capi status / capi register）保持 10s：
+    # 其余几条（console status / capi status / capi register）保持 8s（v.108.70 从 10s 下调，必须短于外层 ct 的 10s）：
     # 它们要的是应答内容，多等几秒才有结果，卡住也不等于「网页没点」。
     # 超时（rc=124）走下面的失败分支：记「注册码未消耗，下次开机重试」，不会重复提交。
     if ! _enroll_out="$(_ct_env "timeout 5 /usr/bin/cscli console enroll \"$_enroll_key\"" 2>&1)"; then
