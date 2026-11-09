@@ -56,7 +56,8 @@ _pr_installed() {
 #   /sbin/init.lxc 是容器 PID1，缺了 lxc-start 报 Failed to exec、容器起不来，
 #   而它落在前五类之外 —— 冒烟与旧清单都判不出（2026-11-09 真机确认）。
 #   /sbin/* 共 58 条（init / procd / netifd / uci / fw4 …）、/etc/lxc/* 3 条、
-#   /usr/share/lxc/* 18 条，全部在位；这些是系统核心与包内数据，缺了该重装。
+#   /usr/share/lxc/config/* 6 条 + lxc.functions（templates / hooks 不保：
+#   只在建容器或配置里启用 hook 时才用，运行不需要）。
 #   /usr/share、/etc/config 一律不看：conffiles 允许用户改动，缺失不等于包坏，
 #   拿它当判据会把「用户改过配置」误判成「包坏了」，每轮重装一次、刷 flash。
 #   工具：opkg 的安装清单 /rom/usr/lib/opkg/info/<pkg>.list 是文本，逐行可读；
@@ -79,7 +80,9 @@ _pr_files_ok() {
         case "$_pfo_f" in
             /usr/bin/*|/usr/sbin/*|/etc/init.d/*|/lib/*.so*|/usr/lib/*.so*) ;;
             # 【2026-11-09】lxc 专有四类：PID1 与配置模板，前一分支看不见。
-            /sbin/*|/etc/lxc/*|/usr/share/lxc/*|/usr/lib/lxc/*) ;;
+            /sbin/*|/etc/lxc/*|/usr/lib/lxc/*) ;;
+            # 容器 config 直接 lxc.include 的模板；templates / hooks 不保
+            /usr/share/lxc/config/*|/usr/share/lxc/lxc.functions) ;;
             *) continue ;;
         esac
         [ -e "$PKGROOT$_pfo_f" ] || return 1
