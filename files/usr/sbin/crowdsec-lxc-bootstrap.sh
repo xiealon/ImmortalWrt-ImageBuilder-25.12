@@ -2931,18 +2931,30 @@ verify_bouncer_verify() {
     _bouncer_rule_sane
     ct_running || return 1
     bouncer_exists || return 1
-    bouncer_pulling || return 1
+    # 2 = 判不了，原样上抛给调用方：它据此「继续等」，不当成「坏了」去重签
+    bouncer_pulling
 }
 build_bouncer_verify() {
     # 拉取有周期：最多等 60 秒看 last_pull 是否刷新（12 轮 × SLEEP=5）。
     # 这个 60s 与 _BP_DEFAULT_MAX_AGE 同量级是刻意的：窗口内要能真正观察到
     # 「阈值过期」，否则 verify 永远在新鲜区间里打转，等于没判定。
     _w=0
+    _bp_unknown=0
     while [ "$_w" -lt 60 ]; do
-        if verify_bouncer_verify; then return 0; fi
+        verify_bouncer_verify
+        _bv=$?
+        [ "$_bv" = "0" ] && return 0
+        # 2 = 判不了（cscli 失败/超时）：继续等它自己恢复，但不计入「失效」
+        [ "$_bv" = "2" ] && _bp_unknown=$((_bp_unknown + 1))
         sleep "$SLEEP" 2>/dev/null || sleep 1
         _w=$((_w + SLEEP))
     done
+    # 整个窗口一次都没判成：证据不足。重签对「命令跑不成」没有意义，
+    # 直接软失败退出，让探针下一轮带新证据再来。
+    if [ "$_bp_unknown" -ge 12 ]; then
+        log "[bouncer] 60s 内 12 次全部判不了（cscli 拿不到输出）—— 证据不足，不重签；先查容器/命令本身"
+        return 1
+    fi
     # 【v.108.58】等不到 ≠「还没到时候」。判据里 bouncer_pulling 依赖 last_pull 推进，
     # 而 last_pull 不推进的一个常见根因是本地 api_key 与 LAPI 的记录已经对不上
     # （见 _force_resign_bouncer 的注释）。这一档原来没有任何修复动作 —— 只是干等
@@ -4009,12 +4021,29 @@ _bp_say() {
     log "$1"
 }
 
-# last_pull 新鲜度判定。返回 0 = 在拉，1 = 失效。
+# last_pull 新鲜度判定。返回 0 = 在拉，1 = 失效，2 = 判不了。
+# 【2026-11-09 用户定】必须是三态。原来只有 0/1，_lp 为空就 return 1，
+# 而 _lp 为空有四种来源：bouncer 真没在拉、lxc-attach 超时(124)、cscli 自己挂、
+# 行在但时间戳格式变了。四种全算「停滞」，于是链条变成：
+#   一次 10s 容器繁忙 -> 探针判停滞 -> 拉起完整引导 -> build 等 60s 仍判不了
+#   -> _force_resign_bouncer 重签 api_key（bouncer 要重新握手）
+# 为一个超时赔上整套重签。判不了就只能说「判不了」，不能冒充「坏了」。
 bouncer_pulling() {
-    _lp="$(_ct_env "$CSCLI bouncers list" 2>/dev/null \
+    _bp_raw="$(_ct_env "$CSCLI bouncers list" 2>/dev/null)"
+    _bp_rc=$?
+    if [ "$_bp_rc" != "0" ]; then
+        _bp_say "[bouncer] last_pull 判不了（cscli 返回 $_bp_rc：124=超时；不是判定为停滞）"
+        return 2
+    fi
+    _lp="$(printf '%s\n' "$_bp_raw" \
         | grep -E "^[[:space:]]*${BOUNCER_NAME}[[:space:]]" \
         | grep -oE "${_TS_RE}Z?" | head -n 1)"
-    [ -n "$_lp" ] || return 1
+    # 命令成功、列表里根本没有这个 bouncer：是真的没了，不是判不了
+    printf '%s\n' "$_bp_raw" | grep -qE "^[[:space:]]*${BOUNCER_NAME}[[:space:]]" || return 1
+    if [ -z "$_lp" ]; then
+        _bp_say "[bouncer] last_pull 判不了（bouncer 行在、但取不到时间戳）"
+        return 2
+    fi
 
     # 阈值：非数字 → 是配置笔误，警告后回落默认（不能静默关闭检查）；
     # 0 → 主动关闭，此时返回 0 是「不查」，日志必须写明，不能跟「查过了，新鲜」混同。
@@ -4406,7 +4435,12 @@ _reinstall_diag() {
     verify_ct_net      >/dev/null 2>&1 && log "[重装]   ct_net 就绪"      || log "[重装]   ct_net 未就绪"
     verify_acquis      >/dev/null 2>&1 && log "[重装]   acquis 就绪"      || log "[重装]   acquis 未就绪"
     verify_ct_resolv   >/dev/null 2>&1 && log "[重装]   ct_resolv 就绪"   || log "[重装]   ct_resolv 未就绪"
-    bouncer_pulling   && log "[重装]   bouncer last_pull 判定为在拉" || log "[重装]   bouncer last_pull 失效"
+    bouncer_pulling
+    case $? in
+        0) log "[重装]   bouncer last_pull 判定为在拉" ;;
+        1) log "[重装]   bouncer last_pull 失效" ;;
+        *) log "[重装]   bouncer last_pull 判不了（cscli 失败/超时/解析失败）" ;;
+    esac
     cs_active_on_host && log "[重装]   bouncer 服务活"         || log "[重装]   bouncer 服务未活"
     nft_table_ready   && log "[重装]   nft 表就绪"             || log "[重装]   nft 表缺失"
     return 0
