@@ -118,6 +118,62 @@ SCRIPT_VER="2026-11-09.2245"
 
 plog() { logger -t crowdsec-probe "$*"; }
 
+# 【2026-11-10.0432】超时包装：固件里有 timeout 就用，没有就降级成看门狗。
+# 为什么探针自备一份、不 source bootstrap 的 _run_capped：
+#   ① bootstrap 是 3200 行的可执行脚本，source 它会连带执行前半段逻辑，
+#      拿不到「只要那一个函数」这件事；
+#   ② 探针与 bootstrap 必须是两个能各自独立工作的进程（本文件的 _guard_run
+#      就是为这个存在的）—— 共用执行路径会互相拖死；
+#   ③ 这段是标准 timeout 语义（TERM → 1s → KILL → 返回 124），
+#      不随业务变化，不属于「加包时漏一处就漂移」的那类判据。
+# 实机背景：2026-11-10 发现探针两处直接调用 timeout，固件无此命令时
+# 恒返回 127 —— bootstrap 从未被真正拉起过，_guard_run 也从未跑过 guard，
+# 等于整套自愈静默失效。降级后即使固件里没有 timeout，两条路径也照常工作。
+_cap() {
+    _pc_cap="$1"; shift
+    if [ -z "$_PC_TO_PROBED" ]; then
+        if command -v timeout >/dev/null 2>&1; then
+            _PC_TO_PROBED=1
+        else
+            _PC_TO_PROBED=0
+            if [ -z "$_PC_TO_MISS" ]; then
+                _PC_TO_MISS=1
+                plog "【timeout】固件里没有 timeout 命令，已降级为看门狗模式（功能不变）"
+            fi
+        fi
+    fi
+    if [ "$_PC_TO_PROBED" = "1" ]; then
+        timeout "$_pc_cap" "$@"
+        return $?
+    fi
+    _pc_tf="/tmp/.pr_cap_$$"
+    rm -f "$_pc_tf"
+    "$@" &
+    _pc_p=$!
+    (
+        _pc_i=0
+        while [ "$_pc_i" -lt "$_pc_cap" ]; do
+            kill -0 "$_pc_p" 2>/dev/null || exit 0
+            sleep 1
+            _pc_i=$((_pc_i + 1))
+        done
+        : >"$_pc_tf"
+        kill -TERM "$_pc_p" 2>/dev/null
+        sleep 1
+        kill -KILL "$_pc_p" 2>/dev/null
+    ) &
+    _pc_w=$!
+    wait "$_pc_p" 2>/dev/null
+    _pc_rc=$?
+    kill -TERM "$_pc_w" 2>/dev/null
+    wait "$_pc_w" 2>/dev/null
+    if [ -f "$_pc_tf" ]; then
+        rm -f "$_pc_tf"
+        return 124
+    fi
+    return "$_pc_rc"
+}
+
 # 所有 bootstrap 调用都从这里走：一处定义、多处引用，避免漏掉某一处。
 # 按参数选档：--probe-check / --verify-only / 其余（完整引导）。
 # _BOOT_MAX 留给 124 那句日志复用 —— 日志里写的必须是**这一档实际用的**上限，
@@ -129,7 +185,7 @@ _boot() {
     --verify-only) _BOOT_MAX="$PROBE_VERIFY_MAX" ;;
     *) _BOOT_MAX="$PROBE_FIX_MAX" ;;
     esac
-    timeout "$_BOOT_MAX" "$BOOT" "$@"
+    _cap "$_BOOT_MAX" "$BOOT" "$@"
 }
 
 # ---- 核心脚本完整性：每轮先复原被改动的脚本，再判定 last_pull ----
@@ -145,7 +201,7 @@ _guard_run() {
     # 【v.180.119】bootstrap 同口径复原：每轮查，与本函数的 guard 同一时机 ——
     # tick 遇到 lock-busy 会提前返回，完整性检查不能跟着停摆。
     _ensure_boot || :
-    [ -x "$GUARD" ] && timeout "$PROBE_GUARD_MAX" "$GUARD" quiet
+    [ -x "$GUARD" ] && _cap "$PROBE_GUARD_MAX" "$GUARD" quiet
     return 0
 }
 
