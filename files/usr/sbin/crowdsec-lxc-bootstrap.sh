@@ -243,13 +243,72 @@ ct() {
 RUN_TIMEOUT="${RUN_TIMEOUT:-10}"
 SVC_TIMEOUT="${SVC_TIMEOUT:-60}"
 TAR_TIMEOUT="${TAR_TIMEOUT:-0}"
-run() { timeout "$RUN_TIMEOUT" "$@"; }
-run_svc() { timeout "$SVC_TIMEOUT" "$@"; }
+# ---- 【2026-11-10.0310】timeout 兜底（与 rc.local 同一套降级逻辑）----
+# 真机实测（192.168.1.201，2026-11-10 03:03）：
+#   command -v timeout → rc=127；/bin/timeout 与 /usr/bin/timeout 都不存在；
+#   busybox --list | grep -c timeout → 0
+# 原实现 run/run_svc/run_tar 每一处都硬依赖 timeout，而全脚本有 300+ 个调用点
+# 走的正是这三个函数。结果就是：第一条 `run uci show network` 返回 127 →
+# 被判「无法解析 /etc/config/network」→ 直接 exit 1 →
+# 28 个小步骤一个都没跑（网络没设、容器没起、guard 没装、smartdns 没配）。
+# 现场症状：日志只有一行【前置检查】，Router IP 停在出厂值，页面全绿但什么也没发生。
+#
+# 这里改成：有 timeout 就用 timeout（行为与原来完全一致）；
+# 没有就退化成「后台跑 + 看门狗 sleep/kill」，超时被杀统一换算成 124，
+# 保持与 GNU timeout 相同的退出码语义，上层判断不用改。
+_BS_TO_PROBED=""
+_BS_TO_MISS=""
+_run_capped() {
+    _bs_cap="$1"; shift
+    if [ -z "$_BS_TO_PROBED" ]; then
+        if command -v timeout >/dev/null 2>&1; then
+            _BS_TO_PROBED=1
+        else
+            _BS_TO_PROBED=0
+            if [ -z "$_BS_TO_MISS" ]; then
+                _BS_TO_MISS=1
+                echo "[$(date '+%F %T')] 【timeout】固件里没有 timeout 命令，已降级为看门狗模式（功能不变）" >>"$BOOT_LOG" 2>/dev/null
+            fi
+        fi
+    fi
+    if [ "$_BS_TO_PROBED" = "1" ]; then
+        timeout "$_bs_cap" "$@"
+        return $?
+    fi
+    _bs_tf="/tmp/.bs_cap_$$"
+    rm -f "$_bs_tf"
+    "$@" &
+    _bs_p=$!
+    (
+        _bs_i=0
+        while [ "$_bs_i" -lt "$_bs_cap" ]; do
+            kill -0 "$_bs_p" 2>/dev/null || exit 0
+            sleep 1
+            _bs_i=$((_bs_i + 1))
+        done
+        : >"$_bs_tf"
+        kill -TERM "$_bs_p" 2>/dev/null
+        sleep 1
+        kill -KILL "$_bs_p" 2>/dev/null
+    ) &
+    _bs_w=$!
+    wait "$_bs_p" 2>/dev/null
+    _bs_rc=$?
+    kill -TERM "$_bs_w" 2>/dev/null
+    wait "$_bs_w" 2>/dev/null
+    if [ -f "$_bs_tf" ]; then
+        rm -f "$_bs_tf"
+        return 124
+    fi
+    return "$_bs_rc"
+}
+run() { _run_capped "$RUN_TIMEOUT" "$@"; }
+run_svc() { _run_capped "$SVC_TIMEOUT" "$@"; }
 run_tar() {
     if [ "${TAR_TIMEOUT:-0}" = "0" ]; then
         "$@"
     else
-        timeout "$TAR_TIMEOUT" "$@"
+        _run_capped "$TAR_TIMEOUT" "$@"
     fi
 }
 ct_running() { run lxc-ls -P "$LXC_PATH" --running 2>/dev/null | grep -qw "$LXC_NAME"; }
