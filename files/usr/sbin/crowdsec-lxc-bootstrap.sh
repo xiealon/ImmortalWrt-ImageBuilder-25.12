@@ -705,6 +705,16 @@ verify_lan_static() {
     [ "$(run uci -q get network.lan.netmask 2>/dev/null)" = "$2" ] || return 1
     [ "$(run uci -q get network.lan.gateway 2>/dev/null)" = "$3" ] || return 1
     [ "$(run uci -q get network.lan.dns 2>/dev/null)" = "$4" ] || return 1
+    # 【2026-11-10.0355】配置对 ≠ 地址在。
+    # 上面六条全是 uci get —— 读的是 /etc/config/network，不是网卡。
+    # 真机现场（192.168.1.201，2026-11-10 03:50 重启）：配置文件里 201 一直在，
+    # 于是这里判「验证通过，跳过」→ build_lan_static 不跑 → flush_uci 不 reload，
+    # 而 netifd 启动那一下并没把地址配上去 → br-lan 没有 inet。
+    # 结果脚本一路往下走 bridge 建 lxcbr0，表现就是「IP 没建好却开始走 lxcbr0」，
+    # 最后整机失联、SSH 连不上（只能去接显示器）。
+    # 这里补一条运行时判据：网卡上必须真能看到 $1/。看不到就返回 1，
+    # 让 build_lan_static 重写配置并触发 network reload。
+    run ip -4 addr show br-lan 2>/dev/null | grep -q "inet $1/" || return 1
     return 0
 }
 
