@@ -638,7 +638,7 @@ luci-i18n-crowdsec-firewall-bouncer-zh-cn nftables-json
 v2ray-geoip v2ray-geosite sing-box
 adblock luci-app-adblock luci-i18n-adblock-zh-cn
 geoview
-luci-app-daed luci-i18n-daed-zh-cn"
+daed luci-app-daede vmlinux-btf"
 
 # 来源 A：packages/ 里 run 包解出的 apk（第三方包，官方源没有）
 #
@@ -673,13 +673,20 @@ _ak_skip_stale=""
 for _f in packages/*.apk; do
     [ -f "$_f" ] || continue
     case "${_f##*/}" in
-    # 【2026-11-02】必须精确到 `vmlinux-btf-<数字>`。honk 的硬依赖叫
-    # vmlinux-btf-builtin-1-r1.apk，旧 glob `vmlinux-btf-*` 会把它连同
-    # vmlinux-btf-6.12.79.apk 一起吃掉 —— 结果它进不了包库，
-    # pkg-restore 的 honk 组能判出缺失、装不回来（保护变空头支票）。
+    # 【2026-11-10】daed 线必须让 vmlinux-btf 进包库：
+    #   ① daed 的 DEPENDS 有 +DAED_USE_VMLINUX_BTF:vmlinux-btf，缺包 make image 报错；
+    #   ② 探针要从 /rom/root/apk-cache 把它装回来，不进库等于空头支票；
+    #   ③ daed 启动要读内核 BTF，版本必须与目标内核一致，装错版本直接起不来。
+    # 所以只放行 build25.sh daed 段下载的那份（版本记在 _DAED_BTF_VER），
+    # run 包顺带带来的旧版（6.12.79 之类）照旧挡掉，不写死版本号。
     vmlinux-btf-[0-9]*)
-        _ak_skip_btf="${_f##*/}"
-        continue
+        case "${_f##*/}" in
+        "vmlinux-btf-${_DAED_BTF_VER}"-*) ;;
+        *)
+            _ak_skip_btf="$_ak_skip_btf ${_f##*/}"
+            continue
+            ;;
+        esac
         ;;
     # 【v.180.136】geo 数据统一走官方源，run 包带来的两份不要。
     # 原因：同名包在库里会凑出 3 个版本 —— PassWall 的 202606182327.1 /
@@ -692,11 +699,11 @@ for _f in packages/*.apk; do
         _ak_skip_geo="$_ak_skip_geo ${_f##*/}"
         continue
         ;;
-    # 【2026-11-09】luci-app-daede / luci-i18n-daede-zh-cn 是改名前的旧名残留
-    # （现在叫 daed）。实测 run 包里带 luci-app-daede-1.14.7-r4.apk，85,493 B，
-    # 既没装、也不在白名单、更不属于任何保护组，纯粹占 squashfs 体积。
-    # 按包名前缀排除，不写死版本号。
-    luci-app-daede-[0-9]* | luci-i18n-daede-[0-9]*)
+    # 【2026-11-10】luci-app-daede 不再是「旧名残留」—— 官方线改用 daed 后
+    # 它就是正主（kenzok8 v2026.11.09 的 LuCI 界面，1.15-r13，PKGARCH:=all）。
+    # 原来的排除规则已删掉，否则会把要装的界面挡在包库外。
+    # luci-i18n-daede-zh-cn 是更早的旧 i18n 名，仍按残留挡掉。
+    luci-i18n-daede-zh-cn-[0-9]*)
         _ak_skip_stale="$_ak_skip_stale ${_f##*/}"
         continue
         ;;
