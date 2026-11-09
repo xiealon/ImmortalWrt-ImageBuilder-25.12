@@ -267,11 +267,12 @@ if echo "$PACKAGES" | grep -q "honk"; then
     _hk_n=0
     for _hk_pkg in honk luci-app-honk luci-lib-daeuniverse luci-i18n-daeuniverse-zh-cn vmlinux-btf-builtin; do
         _hk_url=$(printf '%s' "$_hk_json" \
-            | grep -oE "\"https://[^\"]*/${_hk_pkg}-[0-9][^\"]*\.apk\"" \
         # 〔2026-11-09】取版本号最大的，不取第一个匹配。
         # 起因：honk-apk Release 升到 beta6 时，旧的 beta4 资产没被删掉，
         # assets 列表里 beta4 排在前面，head -n1 会挑到旧版 —— 构建出来还是旧固件。
         # sort -V 按版本号排序，beta6 > beta4，与另两个仓一致。
+        _hk_url=$(printf '%s' "$_hk_json" \
+            | grep -oE "\"https://[^\"]*/${_hk_pkg}-[0-9][^\"]*\.apk\"" \
             | tr -d '"' | sort -V | tail -n1)
         if [ -z "$_hk_url" ]; then
             echo "::error::honk: Release 里没有 ${_hk_pkg}-*.apk"
