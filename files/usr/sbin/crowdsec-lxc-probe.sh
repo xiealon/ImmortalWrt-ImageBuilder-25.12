@@ -844,14 +844,15 @@ probe_tick() {
     # 删掉 /usr/bin/lxc-snapshot 不影响 last_pull，排在后面等于永远不执行。
     _lxc_watch
     # 【2026-11-09 用户定】判据三态：0 在拉 / 1 失效 / 2 判不了。
-    # 判不了（cscli 超时 124 / attach 失败 / 时间戳解析不了）不计入停滞、不动手 ——
-    # 证据不足就去跑完整引导，等于拿一次重建赔一次 10 秒的容器繁忙。
+    # 注意：2 在这里**照常修**，不作豁免。2 的成因都是确定的坏 —— 124 超时
+    # （容器忙/僵死）、127 cscli 被删、126 权限或库断了、1 容器不在、
+    # 其他非 0（cscli 报错）。这些引导都能修，跳过等于「明明能修却不修」。
+    # 三态的用途在引导内部：build_bouncer_verify 靠 2 避免做无意义的重签。
     _pk_rc=0
     _boot --probe-check >/dev/null 2>&1 || _pk_rc=$?
     if [ "$_pk_rc" = "2" ]; then
         P_ACTION="pull-unknown"
-        plog "【停滞】last_pull 判不了（cscli/attach 没拿到结果），本轮不计入、不修"
-        return 0
+        plog "【停滞】last_pull 判不了（cscli/attach 没拿到结果：超时或命令跑不起来），按失效处置"
     fi
     if [ "$_pk_rc" = "0" ]; then
         if [ "${P_STALL:-0}" -gt 0 ]; then
