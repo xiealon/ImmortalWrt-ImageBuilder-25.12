@@ -216,7 +216,7 @@ _check_group() {
     done
     [ -z "$_cg_bad" ] && return 0
     for _cg_n in $_cg_bad; do
-        printf '%%s\n' "$_cg_n" >&2
+        printf '%s\n' "$_cg_n" >&2
     done
     return 1
 }
