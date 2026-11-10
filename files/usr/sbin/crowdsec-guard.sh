@@ -139,6 +139,7 @@ GUARD_FILES="${CS_GUARD_FILES:-
 /etc/init.d/crowdsec-lxc-probe
 /etc/init.d/lxc-auto
 /etc/init.d/cgroup2-guard
+/etc/init.d/zram-guard
 }"
 # 【v.180.163】cgroup2-guard 是这三个 init.d 里唯一没有 .sh 后缀的，
 # 所以按后缀扫的两个通道（本清单早期也是手写枚举、build24/25 的 chmod 列表）
