@@ -476,11 +476,19 @@ echo "==> 容器内受保护文件已进固件（16 个，/rom 只读基准）"
 # 末尾的 2>/dev/null 又把 "No such file" 静默吞掉 —— 权限真丢了也看不出来。
 # 校验循环同样改递归：只 chmod 不校验，等于加了个看不见的兜底。
 chmod +x files/etc/rc.local 2>/dev/null || true
-find files/etc/uci-defaults files/usr/sbin files/etc/init.d \
+# uci-defaults / usr/sbin 下全是 .sh，按后缀筛即可
+find files/etc/uci-defaults files/usr/sbin \
      -type f \( -name '*.sh' -o -name 'rc.local' \) \
      -exec chmod +x {} + 2>/dev/null || true
-for _f in files/etc/rc.local $(find files/etc/uci-defaults files/usr/sbin files/etc/init.d \
-        -type f \( -name '*.sh' -o -name 'rc.local' \) 2>/dev/null); do
+# init.d 下**全部**都给执行位：cgroup2-guard / lxc-auto / zram-guard 没有 .sh
+# 后缀，原来靠 `chmod +x files/etc/init.d/*` 的通配覆盖全部；改成按后缀筛会漏掉
+# 这三个，而它们恰好是「丢了执行位就静默不启动」的那类（devices cgroup 不挂 →
+# dockerd 退出 → docker0 不建）。这个坑 v.180.163 已经踩过一次。
+find files/etc/init.d -type f -exec chmod +x {} + 2>/dev/null || true
+for _f in files/etc/rc.local \
+          $(find files/etc/uci-defaults files/usr/sbin \
+            -type f \( -name '*.sh' -o -name 'rc.local' \) 2>/dev/null) \
+          $(find files/etc/init.d -type f 2>/dev/null); do
     [ -x "$_f" ] || { echo "::error::缺少执行位: $_f"; exit 1; }
 done
 _n_sh=$(find files/usr/sbin -type f -name '*.sh' 2>/dev/null | wc -l | tr -d ' ')
