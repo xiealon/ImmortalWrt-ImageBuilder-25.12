@@ -29,7 +29,7 @@
 # 【v.180.118】两个路径都可被环境覆盖：生产环境走默认值（判真实 /rom 与 /usr/sbin），
 # 只有 tests/probe_boot_heal.sh 会替换成临时目录 —— 否则「脚本被删」这种情形
 # 没法在不动真机的前提下复现。
-BOOT="${CS_PROBE_BOOT:-/usr/sbin/crowdsec-lxc-bootstrap.sh}"
+BOOT="${CS_PROBE_BOOT:-/usr/sbin/bootstrap/bootstrap.sh}"
 ROMDIR="${CS_PROBE_ROM:-/rom}"
 GUARD=/usr/sbin/crowdsec-guard.sh
 LOCK=/tmp/.crowdsec-lxc-bootstrap.lock
@@ -227,7 +227,8 @@ _lock_stale() {
     fi
     # ③ 旧格式锁（v.106 之前留下的空目录，无 pid/ts）：无法自证，用一个保守依据
     #    —— 真有 bootstrap 进程在跑就不动它，否则回收。
-    if pgrep -f "crowdsec-lxc-bootstrap" >/dev/null 2>&1; then
+    if pgrep -f "crowdsec-lxc-bootstrap" >/dev/null 2>&1 \
+   || pgrep -f "/usr/sbin/bootstrap/bootstrap" >/dev/null 2>&1; then
         LOCK_WHY=""
         return 1
     fi
@@ -331,7 +332,7 @@ _up_n() {
 # 现在统一走 --repair：它内部第一步就是 _sd_conf 补文件，再重写主段与 6 条上游、
 # commit 并重启。代价从「补文件后约 2 秒」变成「完整流程约 15 秒」，但只在
 # 连续 N 轮不可用且冷却闸门通过之后触发，不会每分钟来一次。
-_SD_RESTORE="${CS_PROBE_SD_RESTORE:-/usr/sbin/pkg-restore-smartdns.sh}"
+_SD_RESTORE="${CS_PROBE_SD_RESTORE:-/usr/sbin/smartdns/restore.sh}"
 
 # 跑脚本的一个子命令。输出转 syslog（标签与探针分开，排障时能分清谁说的）。
 # 【v.180.198】不再做「53 现场复验」：复验函数随 53 体检一起删除。
@@ -495,7 +496,7 @@ _up_watch() {
         _uw_desc="只补规则文件（不重启，不掉 DNS）"
     fi
     P_ACTION="up-repair"
-    plog "【DNS】$_uw_why 连续 ${PROBE_STALL_ROUNDS} 轮，交 pkg-restore-smartdns.sh $_uw_cmd：$_uw_desc"
+    plog "【DNS】$_uw_why 连续 ${PROBE_STALL_ROUNDS} 轮，交 smartdns/restore.sh $_uw_cmd：$_uw_desc"
     if _up_run "$_uw_cmd" && _up_svc; then
         P_UP_FIX=0
         P_ACTION="up-fixed"

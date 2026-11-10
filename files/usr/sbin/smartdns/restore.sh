@@ -52,6 +52,19 @@ case "${1:-}" in
 --check)
     exec sh "$_here/90-check.sh"
     ;;
+--config|--repair)
+    # 【2026-11-10】兼容旧调用：rc.local 用 --config（开机配一次）、
+    # 探针用 --repair（兜底重试）。拆成本目录之后这两个参数没有语义差别，
+    # 都是「先检测、只修不过的步骤」。留别名的意义只有一个：
+    # 设备端换路径时不用记得连参数一起删，漏删不会 exit 2。
+    ;;
+--conf)
+    # 【2026-11-10】软故障专用：探针判「只是规则文件缺、53 正常」时只传这个，
+    # 语义必须严格保持 —— 只把文件补回 /etc/smartdns，不碰 uci、不 commit、
+    # 不 restart smartdns，全程零中断。走默认流程会因 _need_reload 触发重启，
+    # 等于「删了个 conf 文件」也要掉 15 秒 DNS，正是这个参数要避免的事。
+    exec sh "$_here/02-conf.sh"
+    ;;
 --step)
     _t="${2:-}"
     [ -n "$_t" ] || { echo "用法：$0 --step 01-pkg" >&2; exit 2; }
