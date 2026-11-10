@@ -165,40 +165,20 @@ _sd_cfg_ok() {
     [ "$_scg_bad" = 0 ]
 }
 
-# 上游：条数 = 6，且每条按 ip 找到对应段后逐字段比对。
-# 不按顺序比：段的顺序不影响解析，盯顺序只会误报。
+# 上游：只判「有没有」，不判「是不是我写的那 6 条」。
+#
+# 【2026-11-10 用户定】上游属于**设置项**：用户完全可能自己换供应商、加自建 DNS、
+# 按分流需要调整分组。按表逐条比对会把这些正常设置判成故障，然后拿全清重建
+# 去「修」它 —— 那是保护动作制造出它本来要防的故障。
+# 所以这里与探针 _up_watch 的判据保持完全一致：> 0 就算好，一条都不留才判坏。
+# 真被删光了（> 0 判据失败），05-upstream.sh 会按表全清重建，恢复默认那 6 条。
+# sd_upstream_table() 保留，但只用于写入，不再充当判据。
 _sd_upstream_ok() {
     _suo_cnt=$(uci -q show smartdns 2>/dev/null | grep -c '=server$')
-    case "$_suo_cnt" in ''|*[!0-9]*) _suo_cnt=-1 ;; esac
-    if [ "$_suo_cnt" != "6" ]; then
-        printf '[SD] 上游条数 %s（应为 6）\n' "$_suo_cnt" >&2
+    case "$_suo_cnt" in ''|*[!0-9]*) _suo_cnt=0 ;; esac
+    if [ "$_suo_cnt" -le 0 ]; then
+        printf '[SD] 上游 0 条（至少 1 条才能解析）\n' >&2
         return 1
     fi
-    _suo_bad=0
-    _suo_segs=$(uci -q show smartdns 2>/dev/null | sed -n 's/^smartdns\.\([^.=]*\)=server$/\1/p')
-    sd_upstream_table | while read -r _suo_n _suo_ip _suo_tp _suo_grp _suo_host; do
-        case "$_suo_n" in ''|'#'*) continue ;; esac
-        [ -n "$_suo_ip" ] || continue
-        _suo_hit=""
-        for _suo_s in $_suo_segs; do
-            if [ "$(uci -q get "smartdns.$_suo_s.ip" 2>/dev/null)" = "$_suo_ip" ]; then
-                _suo_hit="$_suo_s"
-                break
-            fi
-        done
-        if [ -z "$_suo_hit" ]; then
-            printf '[SD] 缺上游 %s\n' "$_suo_ip" >&2
-            echo BAD
-            continue
-        fi
-        [ "$(uci -q get "smartdns.$_suo_hit.type" 2>/dev/null)" = "$_suo_tp" ] || {
-            printf '[SD] 上游 %s 的 type 不符\n' "$_suo_ip" >&2; echo BAD; continue; }
-        [ "$(uci -q get "smartdns.$_suo_hit.server_group" 2>/dev/null)" = "$_suo_grp" ] || {
-            printf '[SD] 上游 %s 的 server_group 不符\n' "$_suo_ip" >&2; echo BAD; continue; }
-        if [ "$_suo_host" != "-" ]; then
-            [ "$(uci -q get "smartdns.$_suo_hit.host_name" 2>/dev/null)" = "$_suo_host" ] || {
-                printf '[SD] 上游 %s 的 host_name 不符\n' "$_suo_ip" >&2; echo BAD; continue; }
-        fi
-    done | grep -q BAD && return 1
     return 0
 }
