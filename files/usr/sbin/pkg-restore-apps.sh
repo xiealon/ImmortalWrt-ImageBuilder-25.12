@@ -19,6 +19,13 @@
 #   pkg-restore-apps.sh [--repair]  装回缺的那些，再复判一次
 #                                   0 = 全部在位；1 = 仍有缺（或装不上）
 #
+# 【2026-11-10】adblock 整组移出本脚本，独立成 /usr/sbin/adblock/：
+#   它的恢复 / 配置 / 规则文件 / 删除重建四项都由那边按步骤管，
+#   本脚本只管代理内核（clashoo / daed / sing-box）与 geo 数据。
+#   移除理由：adblock 是本机唯一允许「删了重装」的包，而那条链要整链删除
+#   （单独 del 主包会被 luci-i18n 的反向依赖挡住），代码形态与本脚本的
+#   逐包恢复不同，混在一处两套白名单会互相干扰。
+#
 # 判据主体是包管理器认不认。本版写死 apk（25.12 线只有 apk）：apk info -e。
 # 【2026-11-02】原 daed-geoip / daed-geosite 的软链接例外随 daed 一并移除
 # （25.12 线改用 honk）；honk 的规则集由 native_api 自己下载到 data_dir，
@@ -103,9 +110,9 @@ _RESTORE="${RESTORE_BIN:-/usr/sbin/pkg-restore.sh}"
 #   daed / luci-app-daede / vmlinux-btf
 #   sing-box
 #   v2ray-geoip / v2ray-geosite（2026-11-02 补入，只判包不判文件，见 _PA_GEO）
-#   adblock / luci-app-adblock / luci-i18n-adblock-zh-cn（2026-11-02 补入，见 _PA_ADBLOCK；
-#     这三包 pkg=yes 的前提是把它们收进 build25.sh 的 _AK_WANT —— 当日实测包库
-#     116 个 apk 里 adblock 相关 0 个，光加保护组修不动，已一并收进白名单）
+#   （adblock / luci-app-adblock / luci-i18n-adblock-zh-cn 三包 2026-11-10 移出本脚本，
+#     归 /usr/sbin/adblock/ 独立管理；包库里它们的 apk 照旧收在 build25.sh 的 _AK_WANT，
+#     移除只是换了管它的脚本，不是取消保护）
 #
 # vmlinux-btf 为什么也进 daed 组（2026-11-10）：
 #   daed 的 Makefile 写着 +DAED_USE_VMLINUX_BTF:vmlinux-btf，包内 Depends
@@ -163,22 +170,20 @@ _PA_GEO="v2ray-geoip v2ray-geosite"
 # sing-box 是通用代理内核，原挂在 ssrp 组里，现在单独一组。
 # 它的 kmod 依赖（inet-diag / netlink-diag / tun）同样归 --deps 管。
 _PA_COMMON="sing-box"
-# 【2026-11-02】adblock 组（用户当日定：先留着，并且保护起来）。
-# 三个包是一条依赖链，只写 i18n 也会把 adblock 本体拉进来，所以整链一起护。
+# 【2026-11-10】只判包级、不判文件的组（用户定）。
+# clashoo / daed / honk 是三个互斥的代理内核（同时只能开一个），它们的状态
+# 由用户导入订阅后生成在 /etc/clashoo、/etc/honk 等目录，**不在任何包的
+# 文件清单里**。用文件级判据去判它们，只会把「用户还没配置」误报成「包坏了」，
+# 进而触发重装 —— 而重装既补不回配置（配置不是包内容），又白折腾一次服务。
 #
-# 本组能判两层：
-#   ① 包被 apk del  → _pa_should 命中出厂 P:adblock → 缺失 → 从包库装回，记账与文件一起回；
-#   ② 包在、文件被删 → _pa_files_ok 判 /etc/init.d/adblock 与 /usr/bin/adblock.sh
-#                      （实测 adblock.list 11 行里只有这两个命中 case，
-#                       /www/cgi-bin/adblock 与 /etc/adblock/* 不在 case 范围内，
-#                       所以删界面或规则文件这一层不报 —— 需要时报的是包，不是文件）。
+# 2026-11-10 真机证据：clashoo 装好但 /etc/clashoo/config.yaml 不存在，
+# runtime_state 写的是 health_detail=preflight:config_missing，
+# apk del + apk add 之后 config.yaml 依然不存在 —— 这证明配置与包正交。
 #
-# 刻意**不**把 adblock 三包加进 pkg-restore.sh 的 _DEPS_PKGS：
-# 那边是整份 .list 逐路径从 /rom 拷回，会把 /etc/adblock/adblock.allowlist、
-# adblock.blocklist、adblock.custom.feeds 这些**用户自己加的规则**按出厂版覆盖掉。
-# 这与 /etc/config/ 全目录排除是同一条理由（保护动作制造它要防的故障）：
-# 用户规则被删，宁可让他知道缺了，也不要悄悄换成一份空白的出厂白名单。
-_PA_ADBLOCK="adblock luci-app-adblock luci-i18n-adblock-zh-cn"
+# 结论：这三个组只走 _pa_installed（apk info -e），文件级一律放行。
+# 二进制真被删了，重装包自然连文件一起回来；配置文件不被任何自动动作碰。
+_PA_HONK="honk luci-app-honk luci-i18n-honk-zh-cn"
+_PA_PKGONLY="$_PA_CLASHOO $_PA_DAED $_PA_HONK"
 
 # 【2026-11-02】daed 在 25.12 线已被 honk 取代（用户定），原来的 geo 软链接判据一并删除：
 #   honk 的规则集不走 /usr/share/daed/*.dat 软链接，而是按 native_api.geosite_download_url /
@@ -186,7 +191,10 @@ _PA_ADBLOCK="adblock luci-app-adblock luci-i18n-adblock-zh-cn"
 #   honk 是官方 daeuniverse 源的包，预装进固件后 /rom/lib/apk/db/installed 有 P:honk，
 #   _pa_should 照常命中；被 force-remove 时同样能判出来。
 
-_PA_LIST="${CS_PROBE_APPS:-$_PA_CLASHOO $_PA_GEO $_PA_DAED $_PA_COMMON $_PA_ADBLOCK}"
+# 【2026-11-10】_PA_HONK 并入清单：_PA_PKGONLY 原本写了 honk 三包却不进 _PA_LIST，
+# 等于「判据写了、范围没进去」，只有 honk 变体才该有这三个包，靠 _pa_should 按
+# /rom/lib/apk/db/installed 的 P: 行过滤 —— 纯净 25.12 / daed 线上自动跳过，不误报。
+_PA_LIST="${CS_PROBE_APPS:-$_PA_CLASHOO $_PA_GEO $_PA_DAED $_PA_COMMON $_PA_HONK}"
 
 log() { printf '[APP] %s\n' "$*"; }
 
@@ -197,6 +205,28 @@ log() { printf '[APP] %s\n' "$*"; }
 # 25.12 的 apk info -e 直接问包数据库，不需要缓存，本文件不保留这个变量。
 _pa_installed() {
     apk info -e "$1" >/dev/null 2>&1
+}
+
+# 【2026-11-10】从本地仓库直装单个包，不主动补依赖树。
+# 为什么不用 pkg-restore.sh --tree：那条会顺手把整棵依赖装回来，属于 --deps
+# 的职责；apps 这层只回答「这个包该在而它不在」。依赖真缺时 apk 会拒装并说明
+# 缺哪个，等 --deps 补齐后这里自然就过去了。
+#
+# 【必须注意】rc 只能这样取。2026-11-10 实测踩过坑：
+#     apk add ... 2>&1 | tail -12
+#     echo "RC=$?"        ← 拿到的是 tail 的 0，apk 明明失败却当成功
+# 差点在设备上把 smartdns 删掉后装不回来。
+_pa_add_local() {
+    _pal_log=/tmp/.pa_add.$$.log
+    apk add --no-network --allow-untrusted --force-overwrite "$1" >"$_pal_log" 2>&1
+    _pal_rc=$?
+    [ "$_pal_rc" -eq 0 ] && { rm -f "$_pal_log"; return 0; }
+    # 本地索引还没加载时 apk 会报 no such package，刷一次（纯本地，0 秒）再试
+    apk update >/dev/null 2>&1
+    apk add --no-network --allow-untrusted --force-overwrite "$1" >"$_pal_log" 2>&1
+    _pal_rc=$?
+    rm -f "$_pal_log"
+    return "$_pal_rc"
 }
 
 # 固件里本来就有这个应用吗 —— 见文件头「该不该有」的门槛。
@@ -234,6 +264,10 @@ _pa_data_ok() {
 # **不含 /usr/share** —— 这正是 _PA_GEO 想要的：geo 数据在 /usr/share/v2ray/*.dat，
 # 包里任何一个程序文件在册就判在位，数据新旧、在不在都不影响判断。
 _pa_files_ok() {
+    # 【2026-11-10】代理内核只判包级，见 _PA_PKGONLY 说明。
+    case " $_PA_PKGONLY " in
+    *" $1 "*) return 0 ;;
+    esac
     _paf_l="$ROMDIR/lib/apk/packages/$1.list"
     [ -f "$_paf_l" ] || return 0
     while IFS= read -r _paf_f; do
@@ -305,40 +339,14 @@ _pa_repair() {
             else
                 log "装回失败 $_pa_p（强制重装没成功，本地包库可能没有它）"
             fi
-        elif "$_RESTORE" --tree "$_pa_p"; then
+        elif _pa_add_local "$_pa_p"; then
             log "装回完成 $_pa_p"
         else
-            log "装回失败 $_pa_p（本地包库没有它，或包管理器不可用）"
+            log "装回失败 $_pa_p（本地包库没有它，或依赖缺失待 --deps 补齐）"
         fi
     done
     [ "$_pa_n" -gt 0 ] || log "无需装回（没有「该有却缺失」的应用）"
     # 装完必须重判。apk 没有缓存，直接重算即可。
-    [ -z "$(_pa_missing)" ]
-}
-
-# 【2026-11-10.0525】删除重建（用户定：装回失败就删了重装）。
-# 为什么 --force 不够：--force 走 PCR_FORCE=1 -> apk fix，只按包内容重铺文件、
-# **不动记账**。记账本身坏掉时（包在册但实际不在 / 文件与记账分裂 / conffiles
-# 状态错乱）它会一直报「成功」，复判却依然缺 —— 探针就只能反复重试到 need-human。
-# 删除重建把记账和残留一起清掉，从零装回，是最后一招。
-# 只删主包、不删依赖：不带 --rdepends（apk）/ 用 --force-depends（opkg），
-# 避免把别的应用依赖的共享库一起拖走。
-_pa_rebuild() {
-    _prb_n=0
-    for _prb_p in $(_pa_missing); do
-        _prb_n=$((_prb_n + 1))
-        log "重建 $_prb_p（先删除再重装）"
-        # --no-network：本地库装，不等镜像索引（没网时不会卡住）
-        apk del --no-network "$_prb_p" >/dev/null 2>&1 ||
-            log "删除 $_prb_p 失败（继续尝试重装，结果以复判为准）"
-        if _pa_installed "$_prb_p"; then
-            "$_RESTORE" --force "$_prb_p" || log "重建 $_prb_p 失败（强制重装没成功）"
-        else
-            "$_RESTORE" --tree "$_prb_p" || log "重建 $_prb_p 失败（依赖树装回失败）"
-        fi
-    done
-    [ "$_prb_n" -gt 0 ] || log "无需重建（没有「该有却缺失」的应用）"
-    # 同 _pa_repair：不看删/装的退出码，只认复判。
     [ -z "$(_pa_missing)" ]
 }
 
@@ -353,11 +361,8 @@ case "${1:---repair}" in
 --repair)
     _pa_repair && exit 0 || exit 1
     ;;
---rebuild)
-    _pa_rebuild && exit 0 || exit 1
-    ;;
 -*)
-    echo "用法：$0 --check | --list | --repair | --rebuild" >&2
+    echo "用法：$0 --check | --list | --repair" >&2
     exit 2
     ;;
 *)
