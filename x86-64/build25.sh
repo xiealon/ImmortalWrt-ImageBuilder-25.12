@@ -483,7 +483,8 @@ for _f in files/etc/rc.local $(find files/etc/uci-defaults files/usr/sbin files/
         -type f \( -name '*.sh' -o -name 'rc.local' \) 2>/dev/null); do
     [ -x "$_f" ] || { echo "::error::缺少执行位: $_f"; exit 1; }
 done
-echo "==> 已确保引导/自愈脚本可执行（files/usr/sbin 下 $(ls files/usr/sbin/*.sh 2>/dev/null | wc -l | tr -d ' ') 个）"
+_n_sh=$(find files/usr/sbin -type f -name '*.sh' 2>/dev/null | wc -l | tr -d ' ')
+echo "==> 已确保引导/自愈脚本可执行（files/usr/sbin 全树 $_n_sh 个 .sh，含 bootstrap/smartdns/adblock）"
 
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Building image with the following packages:"
 echo "$PACKAGES"
