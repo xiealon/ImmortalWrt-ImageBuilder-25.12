@@ -605,25 +605,20 @@ _apps_watch() {
     #   第 1 轮检测到缺失 -> 只 warn（不动作）
     #   60s 后第 2 轮确认 -> --repair
     #   装回成功 -> 清计数、回 600s（由 P_APP_BAD=0 自然实现）
-    #   装回失败 -> 立刻删除重建（--rebuild），不是干等下一轮
+    #   装回失败 -> 只计数，600 秒冷却后再试（不做删除重建，原因见下面那段）
     #   重建成功 -> 清计数、回 600s
     #   重建也失败 -> 继续计数，PROBE_FAIL_ALERT 次后 need-human
     # 为什么要重建：--force 走 apk fix / opkg --force-reinstall，只重铺文件
     # 不动记账；记账坏了它会一直报成功而复判仍缺，光重试是死循环。
-    if [ "$P_APP_FIX" -eq 1 ]; then
-        P_ACTION="app-rebuild"
-        plog "【应用】装回失败（仍缺：$_aw_out2），改走删除重建"
-        _cap 180 "$_APPS_RESTORE" --rebuild >>"$BOOT_LOG" 2>&1
-        if _aw_out3="$("$_APPS_RESTORE" --check 2>&1)"; then
-            P_APP_BAD=0
-            P_APP_FIX=0
-            P_ACTION="app-rebuilt"
-            plog "【应用】删除重建成功，主程序已全部在位"
-            return 0
-        fi
-        _aw_out2="$_aw_out3"
-        plog "【应用】删除重建后仍缺：$_aw_out3"
-    fi
+    # 【2026-11-10】原来这里在「装回失败」后调 --rebuild 走删除重建，已删除：
+    #   ① 新版 pkg-restore-apps.sh 没有 --rebuild 参数了（落到 -*) 分支打用法 + exit 2），
+    #      所以这段等于每轮白调一次、日志说「改走删除重建」其实什么都没做；
+    #   ② 就算有这个参数，代理内核也**不该**重建 —— clashoo / daed / honk 的配置是
+    #      用户导入订阅生成的，删掉重装只回出厂骨架，config.yaml / 节点 / 规则全丢。
+    #      这正是 _PA_PKGONLY 把它们限制成「只判包级」的原因。
+    #   ③ adblock 那种「删了能重装」的组已经独立在 /usr/sbin/adblock/05-rebuild.sh，
+    #      由它自己的 restore.sh 调度，不走这里。
+    # 现在的节奏：装回失败 → 计数 → 600 秒冷却后再试 → 连续 3 次转人工。
     if [ "$P_APP_FIX" -ge "$PROBE_FAIL_ALERT" ]; then
         P_ACTION="app-need-human"
         P_HUMAN_APP=1
