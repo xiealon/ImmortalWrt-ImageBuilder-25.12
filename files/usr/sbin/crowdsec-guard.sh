@@ -1,4 +1,7 @@
 #!/bin/sh
+
+# 【2026-11-10】脚本根：guard 自己也在 /rom 里，这里引用的兄弟脚本同样走 SROOT。
+SROOT="${CS_SCRIPT_ROOT-/rom}"
 # 【2026-11-07.2245】固件版本标记 —— 与 crowdsec-lxc-bootstrap.sh 的 SCRIPT_VER 同步，每次改脚本一起改
 # crowdsec-guard：核心脚本防篡改，以 /rom（squashfs 只读分区）为不可变基准
 #
@@ -127,19 +130,17 @@ SCRIPT_VER="2026.11.10"
 # 记账与依赖树：逐字节盖回二进制会绕开包管理器，留下「文件是 guard 盖的、
 # 记账说没装」的状态，LuCI 与后续 apk/opkg 操作都会读错。
 GUARD_FILES="${CS_GUARD_FILES:-
+# 【2026-11-10】宿主编译只剩探针要保护。
+#
+# bootstrap / smartdns / adblock / guard / guard-watch / pkg-* 现在都
+# 直接从 /rom 执行（探针里的路径都走 $SROOT，默认 /rom）。它们在 squashfs
+# 只读分区里，自己改不了也删不掉，再拿「/usr/sbin 副本与 /rom 比对」
+# 就是自己跟自己比 —— 之前那 40 项清单因此全部删掉。
+#
+# 唯一还在可写位置的是探针 /usr/sbin/crowdsec-lxc-probe.sh：
+# 它由 procd 常驻拉起，需要一个可写副本承载运行期状态文件与自愈入口，
+# 所以仍按原方式比对 + 复原。这一项就是它的「自己是活的」的保险。
 /usr/sbin/crowdsec-lxc-probe.sh
-/usr/sbin/crowdsec-guard-watch.sh
-/usr/sbin/crowdsec-guard.sh
-/usr/sbin/pkg-restore.sh
-/usr/sbin/pkg-restore-apps.sh
-/usr/sbin/pkg-cache-lib.sh
-/usr/sbin/pkg-cache-fix.sh
-/usr/sbin/pkg-cache-restore.sh
-/etc/rc.local
-/etc/init.d/crowdsec-lxc-probe
-/etc/init.d/lxc-auto
-/etc/init.d/cgroup2-guard
-/etc/init.d/zram-guard
 }"
 # 【v.180.163】cgroup2-guard 是这三个 init.d 里唯一没有 .sh 后缀的，
 # 所以按后缀扫的两个通道（本清单早期也是手写枚举、build24/25 的 chmod 列表）
@@ -160,7 +161,8 @@ GUARD_FILES="${CS_GUARD_FILES:-
 # 逐文件的 write 还会给每个文件留一份 .user-<时间戳> 备份，几十份在 flash 上太费。
 # 本段是整目录一次签名比对，不一致就整目录换回，一处逻辑管到底。
 # 目录里的 .sh 若被删/被改/丢执行位，60 秒内被 /rom 那版盖回（cp -a 保留权限位）。
-GUARD_DIRS="${CS_GUARD_DIRS:-/usr/share/crowdsec-tests /usr/sbin/bootstrap /usr/sbin/smartdns /usr/sbin/adblock}"
+# 【2026-11-10】清空：三个脚本目录都在 /rom，不需要目录级保护。
+GUARD_DIRS="${CS_GUARD_DIRS:-}"
 
 # 【v.108.45】容器内脚本也纳入保护，但单独一组：它们的目标在容器 rootfs 里，
 # 恢复动作必须多两道门（见 _ct_gate），不能和宿主侧混在一个循环里无条件执行。
@@ -756,8 +758,8 @@ _pkgcache_feed_audit() {
     # 待改的 rootfs（离线修镜像），交给它就等于去改宿主机，静默改错地方。
     case "${ROOT:-}" in
     "" | "/")
-        if [ -x /usr/sbin/pkg-cache-fix.sh ] \
-            && /usr/sbin/pkg-cache-fix.sh >/dev/null 2>&1; then
+        if [ -x "$SROOT/usr/sbin/pkg-cache-fix.sh" ] \
+            && "$SROOT/usr/sbin/pkg-cache-fix.sh" >/dev/null 2>&1; then
             return 0
         fi
         ;;

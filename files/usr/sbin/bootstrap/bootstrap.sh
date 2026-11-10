@@ -23,40 +23,11 @@
 
 _here=$(cd "$(dirname "$0")" && pwd)
 
-# ---- 自举保护（放在最前，且不 source 任何库）----
+# 【2026-11-10】原来的自举段已删除。
+# 入口脚本本身现在直接从 /rom 执行（SROOT 默认 /rom），它所在的 squashfs
+# 是只读分区 —— 自己改不了、也不会被删，所以「先从 /rom 拷一份到自己旁边」
+# 这一步没有意义。保留它反而会往 /usr/sbin 写出 33 份没人用的副本。
 #
-# 为什么必须有这一段：
-#   这些脚本不属于任何 opkg/apk 包（是 files/ 直接铺进固件的），
-#   pkg-restore.sh --deps 是按包文件清单逐路径从 /rom 拉回，覆盖不到它们。
-#   单体时代只有 crowdsec-lxc-bootstrap.sh 一个文件，探针的 _ensure_boot
-#   用 cmp + cp 盯着它就够了；拆成 33 个之后，入口之外的 32 个没有任何
-#   机制复原 —— 删一个就永久坏一个，而且是静默坏（调用时才报 not found）。
-#
-# 为什么不能 source _lib.sh 再调函数：
-#   _lib.sh 自己也是这 33 个之一，它被删时函数根本不存在。
-#   所以这里只用 busybox 基础命令（find / cmp / cp / chmod / mkdir）。
-#
-# 口径与探针 _ensure_boot 一致：**与只读基座不一致就覆盖**。
-# 前提是「更新只通过刷机完成」——刷机后 /rom 即当前版，两边 cmp 相同，
-# 每轮零动作；只有运行副本被删或被改，才从 /rom 复原。
-# 只补不改多余文件：运行端多出来的（用户自己放的）一律不删。
-_sg_fixed=0
-for _sg_d in bootstrap smartdns adblock; do
-    _sg_r="/rom/usr/sbin/$_sg_d"
-    [ -d "$_sg_r" ] || continue
-    for _sg_p in $(cd "$_sg_r" 2>/dev/null && find . -name '*.sh' 2>/dev/null); do
-        _sg_rel=${_sg_p#./}
-        _sg_t="/usr/sbin/$_sg_d/$_sg_rel"
-        [ -f "$_sg_t" ] && cmp -s "$_sg_r/$_sg_rel" "$_sg_t" 2>/dev/null && continue
-        mkdir -p "$(dirname "$_sg_t")" 2>/dev/null
-        if cp -f "$_sg_r/$_sg_rel" "$_sg_t" 2>/dev/null; then
-            chmod 755 "$_sg_t" 2>/dev/null
-            _sg_fixed=$((_sg_fixed + 1))
-        fi
-    done
-done
-[ "$_sg_fixed" -gt 0 ] && echo "[selfguard] 已从只读基座复原 $_sg_fixed 个脚本"
-unset _sg_fixed _sg_d _sg_r _sg_p _sg_rel _sg_t
 
 case "${1:-}" in
 --check-all)

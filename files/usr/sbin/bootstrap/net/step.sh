@@ -14,6 +14,12 @@
 #   ./step.sh --fix            修本组（只动不过的节点）
 #   ./step.sh --node <名字>    只处理单个节点（--check-node / --fix-node 同理）
 
+# 【2026-11-10】脚本根：默认直接从只读基座 /rom 调用。
+# 为什么：/rom 是 squashfs 只读分区，脚本本身改不了，天然免疫篡改与误删 ——
+#   比「运行副本 + 事后比对恢复」更硬，也省掉每轮 73 次进程比对。
+# 需要热修（改脚本立刻生效，不刷机）时，把 CS_SCRIPT_ROOT 设成空串即可退回 /usr/sbin。
+SROOT="${CS_SCRIPT_ROOT-/rom}"
+
 _here=$(cd "$(dirname "$0")" && pwd)
 # 【2026-11-10 修】不能无条件用 "$_here/.." 找依赖。
 # 直接执行时 $0 是 .../bootstrap/<组>/step.sh → _here 是组目录 → ".." 才对。
@@ -428,11 +434,11 @@ _rom_restore_lxc() {
     #   固件上那段扫描恒为空，等于一段永远不会生效的兜底。判据只留 pkg-restore.sh 一处
     #   （那边已改成 opkg 清单 + apk 包库双来源）。pkg-restore.sh 与本脚本同目录出厂，
     #   缺它就说明固件不完整，直接判失败。
-    if [ -x /usr/sbin/pkg-restore.sh ]; then
-        /usr/sbin/pkg-restore.sh --lxc && return 0
+    if [ -x "$SROOT/usr/sbin/pkg-restore.sh" ]; then
+        "$SROOT/usr/sbin/pkg-restore.sh" --lxc && return 0
         return 1
     fi
-    log "[PKG] 缺少 /usr/sbin/pkg-restore.sh，无法恢复 lxc 全家桶"
+    log "[PKG] 缺少 $SROOT/usr/sbin/pkg-restore.sh，无法恢复 lxc 全家桶"
     return 1
 }
 

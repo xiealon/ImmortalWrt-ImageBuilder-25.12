@@ -1,4 +1,10 @@
 #!/bin/sh
+
+# 【2026-11-10】脚本根：默认直接从只读基座 /rom 调用。
+# /rom 是 squashfs 只读分区，脚本本身改不了，天然免疫篡改与误删；
+# 比「运行副本 + 事后比对恢复」更硬，也省掉每轮 73 次进程比对。
+# 需要热修时把 CS_SCRIPT_ROOT 设成空串，退回 /usr/sbin 副本。
+SROOT="${CS_SCRIPT_ROOT-/rom}"
 # 【2026-11-07.2245】固件版本标记 —— 与 crowdsec-lxc-bootstrap.sh 的 SCRIPT_VER 同步，每次改脚本一起改
 # crowdsec-lxc-probe：运行期 last_pull 监视探针（v.106）
 # 职责边界（刻意收窄成一条）：
@@ -29,9 +35,9 @@
 # 【v.180.118】两个路径都可被环境覆盖：生产环境走默认值（判真实 /rom 与 /usr/sbin），
 # 只有 tests/probe_boot_heal.sh 会替换成临时目录 —— 否则「脚本被删」这种情形
 # 没法在不动真机的前提下复现。
-BOOT="${CS_PROBE_BOOT:-/usr/sbin/bootstrap/bootstrap.sh}"
+BOOT="${CS_PROBE_BOOT:-$SROOT/usr/sbin/bootstrap/bootstrap.sh}"
 ROMDIR="${CS_PROBE_ROM:-/rom}"
-GUARD=/usr/sbin/crowdsec-guard.sh
+GUARD="$SROOT/usr/sbin/crowdsec-guard.sh"
 LOCK=/tmp/.crowdsec-lxc-bootstrap.lock
 # 【v.108.70】与 bootstrap 同源。bootstrap 自己认 CS_BOOTSTRAP_LOG（第 171 行），
 # 但 probe 这边原来是硬编码：改了 bootstrap 的日志路径，probe 还在往老文件追加输出、
@@ -198,11 +204,11 @@ _boot() {
 # 这里只保证 crontab 那行在（幂等，一次 grep 约 3ms），调度交给 cron。
 # 放在 _guard_run 里而不是只放启动时：crontab 被清空也能在下一轮补回来。
 _ensure_guard_cron() {
-    [ -x /usr/sbin/crowdsec-guard-watch.sh ] || return 0
+    [ -x "$SROOT/usr/sbin/crowdsec-guard-watch.sh" ] || return 0
     _egc_f=/etc/crontabs/root
     [ -f "$_egc_f" ] || mkdir -p /etc/crontabs 2>/dev/null
-    grep -qF '/usr/sbin/crowdsec-guard-watch.sh' "$_egc_f" 2>/dev/null && return 0
-    printf '%s\n' '*/2 * * * * /usr/sbin/crowdsec-guard-watch.sh' >>"$_egc_f" 2>/dev/null || return 1
+    grep -qF "$SROOT/usr/sbin/crowdsec-guard-watch.sh" "$_egc_f" 2>/dev/null && return 0
+    printf '%s\n' "*/2 * * * * $SROOT/usr/sbin/crowdsec-guard-watch.sh" >>"$_egc_f" 2>/dev/null || return 1
     # 不 reload、不 restart：
     #   · 本固件的 /etc/init.d/cron 里**没有 reload 动作**（实测 grep -c reload = 0）；
     #   · restart 会打断正在执行的任务 —— acme renew 排在 0 点整，正好撞上；
@@ -248,7 +254,7 @@ _lock_stale() {
     # ③ 旧格式锁（v.106 之前留下的空目录，无 pid/ts）：无法自证，用一个保守依据
     #    —— 真有 bootstrap 进程在跑就不动它，否则回收。
     if pgrep -f "crowdsec-lxc-bootstrap" >/dev/null 2>&1 \
-   || pgrep -f "/usr/sbin/bootstrap/bootstrap" >/dev/null 2>&1; then
+   || pgrep -f "$SROOT/usr/sbin/bootstrap/bootstrap" >/dev/null 2>&1; then
         LOCK_WHY=""
         return 1
     fi
@@ -277,6 +283,16 @@ _ensure_boot() {
     # 刷机后 /rom 里就是当前版，两边 cmp 相同，本函数每轮都零动作。
     # 代价（已知并接受）：不刷机、却在路由器上手动换掉运行副本的话，
     # 下一轮就会被 /rom 那份盖回去。
+    # 【2026-11-10】BOOT 指向 /rom 时不需要「复原」——它就在只读分区里，改不了。
+    # 原来这里无条件拼 $ROMDIR$BOOT，BOOT 改成 /rom/... 之后会拼成
+    # /rom/rom/... 这种不存在的路径，虽然能落到下面的兜底分支，但日志会误导。
+    case "$BOOT" in
+    "$ROMDIR"/*)
+        [ -x "$BOOT" ] && return 0
+        plog "【脚本】$BOOT 在只读基座里但没有执行位（固件构建问题，需重刷）"
+        return 1
+        ;;
+    esac
     _eb_src="${BOOT_SRC:-$ROMDIR$BOOT}"
     # 只读基座里没有可用版本 → 补不了，交给调用方记 78
     [ -x "$_eb_src" ] || {
@@ -352,7 +368,7 @@ _up_n() {
 # 现在统一走 --repair：它内部第一步就是 _sd_conf 补文件，再重写主段与 6 条上游、
 # commit 并重启。代价从「补文件后约 2 秒」变成「完整流程约 15 秒」，但只在
 # 连续 N 轮不可用且冷却闸门通过之后触发，不会每分钟来一次。
-_SD_RESTORE="${CS_PROBE_SD_RESTORE:-/usr/sbin/smartdns/restore.sh}"
+_SD_RESTORE="${CS_PROBE_SD_RESTORE:-$SROOT/usr/sbin/smartdns/restore.sh}"
 
 # 跑脚本的一个子命令。输出转 syslog（标签与探针分开，排障时能分清谁说的）。
 # 【v.180.198】不再做「53 现场复验」：复验函数随 53 体检一起删除。
@@ -544,7 +560,7 @@ _up_watch() {
 # 判据与「该不该有」的门槛全在脚本里（只恢复固件本来就带的那些包），
 # 探针这边只做三件事：拉脚本问一次 → 连续 N 轮缺才动作 → 装完再问一次。
 # 修法只留一处，与 smartdns 那条通道同一个取向（v.180.158）。
-_APPS_RESTORE="${CS_PROBE_APPS_RESTORE:-/usr/sbin/pkg-restore-apps.sh}"
+_APPS_RESTORE="${CS_PROBE_APPS_RESTORE:-$SROOT/usr/sbin/pkg-restore-apps.sh}"
 
 _apps_watch() {
     [ -x "$_APPS_RESTORE" ] || return 0
@@ -643,7 +659,7 @@ _apps_watch() {
 # 为什么必须走文件级：kmod-* 在固件出厂库里有、包库里没有 apk，apk add 无处可装；
 # 而「包在册、文件被 whiteout」这种形态 apk info -e 完全看不见。
 # 详见 pkg-restore.sh 里 --deps 那段的说明。
-_KMODS_RESTORE="${CS_PROBE_KMODS_RESTORE:-/usr/sbin/pkg-restore.sh}"
+_KMODS_RESTORE="${CS_PROBE_KMODS_RESTORE:-$SROOT/usr/sbin/pkg-restore.sh}"
 
 _kmods_watch() {
     [ -f "$_KMODS_RESTORE" ] || return 0
@@ -997,7 +1013,7 @@ PKG_STATE="${CS_PROBE_PKG_STATE:-/tmp/crowdsec-probe.pkgcache}"
 # 文件从上线起没被任何代码调用过，却被 guard 逐字节保护、被构建补执行位，
 # 而且它与内联版判据还不一样（各有一项对方没有的检查）。
 # 已随本版删除该脚本，判定只留 _pkgcache_probe 一处，不再有两份判据各改一边。
-PKG_FIX_BIN="${CS_PROBE_PKG_FIX:-/usr/sbin/pkg-cache-fix.sh}"
+PKG_FIX_BIN="${CS_PROBE_PKG_FIX:-$SROOT/usr/sbin/pkg-cache-fix.sh}"
 
 _pkgcache_probe() {
     _pk_msg=""

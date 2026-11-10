@@ -1,4 +1,10 @@
 #!/bin/sh
+
+# 【2026-11-10】脚本根：默认直接从只读基座 /rom 调用。
+# /rom 是 squashfs 只读分区，脚本本身改不了，天然免疫篡改与误删；
+# 比「运行副本 + 事后比对恢复」更硬，也省掉每轮 73 次进程比对。
+# 需要热修时把 CS_SCRIPT_ROOT 设成空串，退回 /usr/sbin 副本。
+SROOT="${CS_SCRIPT_ROOT-/rom}"
 # bootstrap/_lib.sh —— 全局定义 + 基础设施
 #
 # 拆分自 crowdsec-lxc-bootstrap.sh（2026-11-10）。内容：
@@ -521,8 +527,8 @@ _lxc_missing_deps() {
         *"Error loading"*|*"No such file"*|*"not found"*|*"cannot open shared object"*)
             _LXC_MISSING=" lxc(缺件或动态库)" ;;
     esac
-    if [ -z "$_LXC_MISSING" ] && [ -x /usr/sbin/pkg-restore.sh ]; then
-        _lxd_f="$(/usr/sbin/pkg-restore.sh --lxc-files 2>/dev/null)"; _lxd_rc=$?
+    if [ -z "$_LXC_MISSING" ] && [ -x "$SROOT/usr/sbin/pkg-restore.sh" ]; then
+        _lxd_f="$("$SROOT/usr/sbin/pkg-restore.sh" --lxc-files 2>/dev/null)"; _lxd_rc=$?
         if [ "$_lxd_rc" = "1" ]; then
             _lxd_f=$(printf '%s' "$_lxd_f" | tr '\n' ',')
             _LXC_MISSING=" lxc(文件缺:${_lxd_f%,})"
@@ -547,8 +553,8 @@ _lxc_missing_deps() {
 # 加包时漏一处就是「判得出、装不回」。
 # 没有这个接口时保守放过（老固件退回 v.180.163 行为，不因缺接口而硬失败）。
 _lxc_missing_pkgs() {
-    [ -x /usr/sbin/pkg-restore.sh ] || return 0
-    _LXC_MISSING_PKGS=$(/usr/sbin/pkg-restore.sh --lxc-missing 2>/dev/null)
+    [ -x "$SROOT/usr/sbin/pkg-restore.sh" ] || return 0
+    _LXC_MISSING_PKGS=$("$SROOT/usr/sbin/pkg-restore.sh" --lxc-missing 2>/dev/null)
     [ -z "$_LXC_MISSING_PKGS" ]
 }
 

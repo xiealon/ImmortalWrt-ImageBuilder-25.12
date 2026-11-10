@@ -10,6 +10,12 @@
 #   . "$_here/_lib.sh"
 
 set -u
+
+# 【2026-11-10】脚本根：默认直接从只读基座 /rom 调用。
+# 为什么：/rom 是 squashfs 只读分区，脚本本身改不了，天然免疫篡改与误删 ——
+#   比「运行副本 + 事后比对恢复」更硬，也省掉每轮 73 次进程比对。
+# 需要热修（改脚本立刻生效，不刷机）时，把 CS_SCRIPT_ROOT 设成空串即可退回 /usr/sbin。
+SROOT="${CS_SCRIPT_ROOT-/rom}"
 ROMDIR="${ROMDIR:-/rom}"
 PKGROOT="${PKGROOT:-}"
 
@@ -19,8 +25,8 @@ PKGROOT="${PKGROOT:-}"
 #   ③ 与本脚本同目录 —— 两个脚本一起被拷到 /tmp 单独验时的情况。
 RESTORE_BIN="${RESTORE_BIN:-}"
 if [ -z "$RESTORE_BIN" ]; then
-    if [ -x /usr/sbin/pkg-restore.sh ]; then
-        RESTORE_BIN=/usr/sbin/pkg-restore.sh
+    if [ -x "$SROOT/usr/sbin/pkg-restore.sh" ]; then
+        RESTORE_BIN="$SROOT/usr/sbin/pkg-restore.sh"
     else
         RESTORE_BIN="$(dirname "$0")/pkg-restore.sh"
     fi

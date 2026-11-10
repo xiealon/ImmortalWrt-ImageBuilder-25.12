@@ -1,4 +1,10 @@
 #!/bin/sh
+
+# 【2026-11-10】脚本根：默认直接从只读基座 /rom 调用。
+# /rom 是 squashfs 只读分区，脚本本身改不了，天然免疫篡改与误删；
+# 比「运行副本 + 事后比对恢复」更硬，也省掉每轮 73 次进程比对。
+# 需要热修时把 CS_SCRIPT_ROOT 设成空串，退回 /usr/sbin 副本。
+SROOT="${CS_SCRIPT_ROOT-/rom}"
 # bootstrap/main.sh —— 主入口
 #
 # 内容：main（八组串行 + 收尾复核）、_bs_on_exit / _bs_on_signal（退出即恢复）、
@@ -85,8 +91,8 @@ _pkgcache_install() {
     # 【v.180.133】优先交给独立脚本 pkg-cache-restore.sh：它自己会先按
     # resolve -> 挂源 -> 铺索引 的顺序把前置做好，再装 —— 顺序不再依赖调用方。
     # 下面这段内置实现保留为兜底：老固件里没有那个脚本，行为必须完全不变。
-    if [ -x /usr/sbin/pkg-cache-restore.sh ]; then
-        if /usr/sbin/pkg-cache-restore.sh "$1" >/dev/null 2>&1; then
+    if [ -x "$SROOT/usr/sbin/pkg-cache-restore.sh" ]; then
+        if "$SROOT/usr/sbin/pkg-cache-restore.sh" "$1" >/dev/null 2>&1; then
             log "[PKG] 经 pkg-cache-restore.sh 装回：$1"
             return 0
         fi

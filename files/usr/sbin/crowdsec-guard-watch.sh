@@ -1,4 +1,10 @@
 #!/bin/sh
+
+# 【2026-11-10】脚本根：默认直接从只读基座 /rom 调用。
+# /rom 是 squashfs 只读分区，脚本本身改不了，天然免疫篡改与误删；
+# 比「运行副本 + 事后比对恢复」更硬，也省掉每轮 73 次进程比对。
+# 需要热修时把 CS_SCRIPT_ROOT 设成空串，退回 /usr/sbin 副本。
+SROOT="${CS_SCRIPT_ROOT-/rom}"
 # crowdsec-guard-watch.sh —— guard 的单次触发入口（cron 每 2 分钟调用）
 #
 # 为什么需要它：
@@ -14,7 +20,7 @@
 #
 # 幂等：任何时候跑、跑多少次都安全。拿不到锁就安静退出，不写日志。
 
-GUARD="${CS_GUARD:-/usr/sbin/crowdsec-guard.sh}"
+GUARD="${CS_GUARD:-$SROOT/usr/sbin/crowdsec-guard.sh}"
 ROM="${CS_GUARD_ROM:-/rom}"
 CAP="${CS_GUARD_WATCH_MAX:-60}"
 

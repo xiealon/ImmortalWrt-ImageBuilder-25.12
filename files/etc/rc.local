@@ -2,7 +2,7 @@
 # 【2026-11-07.2245】固件版本标记 —— 与 crowdsec-lxc-bootstrap.sh 的 SCRIPT_VER 同步，每次改脚本一起改
 # rc.local：开机引导入口（只做前置检查 + 持锁，不含任何修复/安装逻辑）
 LOG=/root/crowdsec-lxc-bootstrap.log
-BOOT=/usr/sbin/crowdsec-lxc-bootstrap.sh
+BOOT=/rom/usr/sbin/bootstrap/bootstrap.sh
 LOCK=/tmp/.crowdsec-lxc-bootstrap.lock
 # 【v.180.78】固件版本号。五个脚本统一用 SCRIPT_VER 一个名字，
 # 一条命令就能全查出来：
@@ -10,7 +10,7 @@ LOCK=/tmp/.crowdsec-lxc-bootstrap.lock
 #        /etc/init.d/crowdsec-lxc-probe
 # 只有 crowdsec-lxc-bootstrap.sh 的那一份参与 CFG_SHA_FILE 指纹判定；
 # 这里这份纯标记，改它不会触发任何重写。
-SCRIPT_VER="2026-11-09.2130"
+SCRIPT_VER="2026.11.10"
 
 # ---- 【2026-11-10】timeout 兜底 ----
 # 真机实测（24.10 线，2026-11-10 02:20）：
@@ -58,12 +58,9 @@ _run_capped() {
 # 顺序是硬要求：bootstrap 被删时下面的存在性检查会直接 exit 0，那样就再没有
 # 机会把它恢复回来。放在前面，前置检查看到的永远是复原后的现场。
 # guard 不负责它自己（被改成 exit 0 就什么都不会复原），所以调用前先自举。
-GUARD=/usr/sbin/crowdsec-guard.sh
-if [ -f "/rom$GUARD" ] && ! cmp -s "/rom$GUARD" "$GUARD" 2>/dev/null; then
-    rm -f "$GUARD"
-    cp -f "/rom$GUARD" "$GUARD" 2>/dev/null
-    chmod 755 "$GUARD" 2>/dev/null
-fi
+# 【2026-11-10】guard 直接跑 /rom 里的版本：它在 squashfs 只读分区，
+# 改不了也不需要复原。原来的「先自举 guard 再调用」两段合并成一行。
+GUARD=/rom/usr/sbin/crowdsec-guard.sh
 [ -x "$GUARD" ] && "$GUARD" quiet
 
 # ---- 阶段【前置检查】：不通过则本轮直接跳过，不动锁、不引导 ----
@@ -134,7 +131,7 @@ rm -rf "$LOCK" 2>/dev/null
 #   口径因此统一为「一条上游都没有才恢复 6 条」：手工删过几条的用户，
 #   重启后不会被强制补回 6 条（此前是无条件重写，与探针口径正好相反）。
 # 失败不判死：探针在「DNS 不正常」连续 3 轮、且冷却闸门通过时会自己再调 --config。
-SD_RESTORE=/usr/sbin/pkg-restore-smartdns.sh
+SD_RESTORE=/rom/usr/sbin/smartdns/restore.sh
 if [ -x "$SD_RESTORE" ]; then
     SD_UP_N=$(uci -q show smartdns 2>/dev/null | grep -c '=server$')
     case "$SD_UP_N" in '' | *[!0-9]*) SD_UP_N=0 ;; esac
@@ -152,8 +149,8 @@ fi
 # 为什么不放探针里：这两项都是独立脚本，不依赖探针的「连续 N 轮 + 冷却」那套机制。
 # 包被删不影响转发，开机补一次够用；探针只留 last_pull / DNS / lxc / bouncer。
 # 两项各自带「该不该有」的门槛（读 /rom 里的 apk 已装库），固件本来没装的应用不会被强装。
-PA_RESTORE=/usr/sbin/pkg-restore-apps.sh
-PKG_RESTORE=/usr/sbin/pkg-restore.sh
+PA_RESTORE=/rom/usr/sbin/pkg-restore-apps.sh
+PKG_RESTORE=/rom/usr/sbin/pkg-restore.sh
 if [ -x "$PA_RESTORE" ]; then
     if _run_capped 30 /bin/sh "$PA_RESTORE" --check >/dev/null 2>&1; then
         echo "[$(date '+%F %T')] 【应用包】主程序齐全，跳过装回" >>"$LOG"

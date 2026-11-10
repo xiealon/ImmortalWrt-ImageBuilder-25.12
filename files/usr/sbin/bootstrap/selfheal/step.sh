@@ -1,4 +1,10 @@
 #!/bin/sh
+
+# 【2026-11-10】脚本根：默认直接从只读基座 /rom 调用。
+# /rom 是 squashfs 只读分区，脚本本身改不了，天然免疫篡改与误删；
+# 比「运行副本 + 事后比对恢复」更硬，也省掉每轮 73 次进程比对。
+# 需要热修时把 CS_SCRIPT_ROOT 设成空串，退回 /usr/sbin 副本。
+SROOT="${CS_SCRIPT_ROOT-/rom}"
 # bootstrap/selfheal/step.sh —— 重装自愈阶梯
 #
 # 内容：tier-3（_escalate_reinstall / full_reinstall / _structurally_broken）、
@@ -121,10 +127,9 @@ _pending_recover() {
 # 保留 _failed / GSET_ 那套跨组依赖传播）。
 _bs_reexec() {
     _ent=""
-    for _c in /usr/sbin/bootstrap/bootstrap.sh \
+    for _c in "$SROOT/usr/sbin/bootstrap/bootstrap.sh" \
               "$(dirname "$0")/../bootstrap.sh" \
-              "$(dirname "$0")/../../bootstrap.sh" \
-              /usr/sbin/crowdsec-lxc-bootstrap.sh; do
+              "$(dirname "$0")/../../bootstrap.sh"; do
         [ -f "$_c" ] && { _ent="$_c"; break; }
     done
     if [ -z "$_ent" ]; then

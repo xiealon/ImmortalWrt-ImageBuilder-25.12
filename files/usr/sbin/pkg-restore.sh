@@ -33,12 +33,18 @@
 # 例外：--lxc-files 走三态（0 齐全 / 1 有缺并列出包名 / 2 只读基底没有 lxc 清单）
 
 set -u
+
+# 【2026-11-10】脚本根：默认直接从只读基座 /rom 调用。
+# 为什么：/rom 是 squashfs 只读分区，脚本本身改不了，天然免疫篡改与误删 ——
+#   比「运行副本 + 事后比对恢复」更硬，也省掉每轮 73 次进程比对。
+# 需要热修（改脚本立刻生效，不刷机）时，把 CS_SCRIPT_ROOT 设成空串即可退回 /usr/sbin。
+SROOT="${CS_SCRIPT_ROOT-/rom}"
 ROMDIR="${ROMDIR:-/rom}"
 PKGROOT="${PKGROOT:-}"
 
 # 【2026-10-31.0256】包级安装脚本路径写死（用户 2026-10-31 定：能写死的都写死）。
 # 固件里就在 /usr/sbin；「同目录兜底」那条分支在真机上从未走到过，删掉。
-RESTORE_BIN="${RESTORE_BIN:-/usr/sbin/pkg-cache-restore.sh}"
+RESTORE_BIN="${RESTORE_BIN:-$SROOT/usr/sbin/pkg-cache-restore.sh}"
 
 log() { printf '[PKG] %s\n' "$*"; }
 
