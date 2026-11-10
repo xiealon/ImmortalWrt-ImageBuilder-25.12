@@ -130,17 +130,26 @@ SCRIPT_VER="2026.11.10"
 # 记账与依赖树：逐字节盖回二进制会绕开包管理器，留下「文件是 guard 盖的、
 # 记账说没装」的状态，LuCI 与后续 apk/opkg 操作都会读错。
 GUARD_FILES="${CS_GUARD_FILES:-
-# 【2026-11-10】宿主编译只剩探针要保护。
+# 【2026-11-10】这三项都在**可写分区**，是自愈链上唯一需要保护的环节：
 #
-# bootstrap / smartdns / adblock / guard / guard-watch / pkg-* 现在都
-# 直接从 /rom 执行（探针里的路径都走 $SROOT，默认 /rom）。它们在 squashfs
-# 只读分区里，自己改不了也删不掉，再拿「/usr/sbin 副本与 /rom 比对」
-# 就是自己跟自己比 —— 之前那 40 项清单因此全部删掉。
+#   ① /usr/sbin/crowdsec-lxc-probe.sh
+#      探针本体。由 procd 常驻拉起，运行期状态文件写在 /tmp 与 /root，
+#      所以它必须是可写副本，不能像其他脚本那样直接从 /rom 跑。
 #
-# 唯一还在可写位置的是探针 /usr/sbin/crowdsec-lxc-probe.sh：
-# 它由 procd 常驻拉起，需要一个可写副本承载运行期状态文件与自愈入口，
-# 所以仍按原方式比对 + 复原。这一项就是它的「自己是活的」的保险。
+#   ② /etc/init.d/crowdsec-lxc-probe
+#      procd 服务壳（START=99）。它没了 = 探针不会被拉起 = 整条自愈链没有大脑。
+#      它在 overlay 上（/etc 可写），被删或改坏都无法自愈，只能靠 guard 比对 /rom 补回。
+#
+#   ③ /etc/rc.local
+#      开机第一入口。OpenWrt 的 /etc/init.d/done 判的是 [ -x /etc/rc.local ]，
+#      没有执行位或文件不在，整段开机收尾被跳过 —— bootstrap 一次都不跑，
+#      Router IP 不生效、guard / smartdns / 应用包恢复全部不执行。
+#
+# 其余 38 个脚本（bootstrap 16 / smartdns-restore 10 / adblock 7 / 另 5 个单文件）
+# 都直接从 /rom 执行，squashfs 只读、改不了删不掉，不需要再比对。
 /usr/sbin/crowdsec-lxc-probe.sh
+/etc/init.d/crowdsec-lxc-probe
+/etc/rc.local
 }"
 # 【v.180.163】cgroup2-guard 是这三个 init.d 里唯一没有 .sh 后缀的，
 # 所以按后缀扫的两个通道（本清单早期也是手写枚举、build24/25 的 chmod 列表）
