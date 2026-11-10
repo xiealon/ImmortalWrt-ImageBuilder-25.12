@@ -1,5 +1,5 @@
 #!/bin/bash
-# 【v.180.198】固件版本标记 —— 与 crowdsec-lxc-bootstrap.sh 的 SCRIPT_VER 同步，每次改脚本一起改
+# 【2026-11-10】固件版本标记 —— 与 bootstrap/bootstrap.sh 的 SCRIPT_VER 同步，每次改脚本一起改
 source shell/apk-custom-packages.sh
 echo "第三方apk软件包: $CUSTOM_PACKAGES"
 LOGFILE="/tmp/uci-defaults-log.txt"
@@ -471,13 +471,16 @@ echo "==> 容器内受保护文件已进固件（16 个，/rom 只读基准）"
 # 「files/usr/sbin/*.sh」和「逐个点名的 init.d 两项」两条通道都漏了它 ——
 # 它靠 git mode 恰好是 755 才没出事，一旦哪次提交丢了执行位，docker 会在
 # 开机时静默失败（devices cgroup 没挂 → dockerd 退出 → docker0 不建）。
-chmod +x files/etc/rc.local \
-         files/etc/uci-defaults/*.sh \
-         files/usr/sbin/*.sh \
-         files/etc/init.d/* 2>/dev/null
-for _f in files/etc/rc.local \
-          files/usr/sbin/*.sh \
-          files/etc/init.d/*; do
+# 【2026-11-10】改成递归扫。原来 files/usr/sbin/*.sh 只匹配**一层**，
+# 拆分后的 bootstrap/ smartdns/ adblock/ 三个子目录（33 个 .sh）全在匹配之外；
+# 末尾的 2>/dev/null 又把 "No such file" 静默吞掉 —— 权限真丢了也看不出来。
+# 校验循环同样改递归：只 chmod 不校验，等于加了个看不见的兜底。
+chmod +x files/etc/rc.local 2>/dev/null || true
+find files/etc/uci-defaults files/usr/sbin files/etc/init.d \
+     -type f \( -name '*.sh' -o -name 'rc.local' \) \
+     -exec chmod +x {} + 2>/dev/null || true
+for _f in files/etc/rc.local $(find files/etc/uci-defaults files/usr/sbin files/etc/init.d \
+        -type f \( -name '*.sh' -o -name 'rc.local' \) 2>/dev/null); do
     [ -x "$_f" ] || { echo "::error::缺少执行位: $_f"; exit 1; }
 done
 echo "==> 已确保引导/自愈脚本可执行（files/usr/sbin 下 $(ls files/usr/sbin/*.sh 2>/dev/null | wc -l | tr -d ' ') 个）"

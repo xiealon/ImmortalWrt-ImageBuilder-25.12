@@ -154,11 +154,26 @@ jobs:
                  \( -name '*.sh' -o -name 'rc.local' \) -exec chmod +x {} + 2>/dev/null || true
           done
           echo "==> 可执行位复核（rc.local 必须 -rwxr-xr-x）"
+          # 【2026-11-10】拆分后入口变成 bootstrap/bootstrap.sh，原来的
+          # files/usr/sbin/crowdsec-lxc-bootstrap.sh 已删除 —— 引用它会让
+          # ls 返回非零，整步在 bash -e 下直接失败。
           ls -l "${{ github.workspace }}/files/etc/rc.local" \
-                "${{ github.workspace }}/files/usr/sbin/crowdsec-lxc-bootstrap.sh" \
+                "${{ github.workspace }}/files/usr/sbin/bootstrap/bootstrap.sh" \
+                "${{ github.workspace }}/files/usr/sbin/crowdsec-guard-watch.sh" \
                 "${{ github.workspace }}/x86-64/build25.sh"
           [ -x "${{ github.workspace }}/files/etc/rc.local" ] \
             || { echo "::error::files/etc/rc.local 仍无执行位，开机不会跑任何引导"; exit 1; }
+          [ -x "${{ github.workspace }}/files/etc/rc.local" ] \
+            || { echo "::error::files/etc/rc.local 仍无执行位，开机不会跑任何引导"; exit 1; }
+          for _x in files/usr/sbin/bootstrap/bootstrap.sh \
+                    files/usr/sbin/crowdsec-guard-watch.sh \
+                    files/usr/sbin/smartdns/restore.sh \
+                    files/usr/sbin/adblock/restore.sh; do
+            [ -x "${{ github.workspace }}/$_x" ] \
+              || { echo "::error::$_x 无执行位（拆分后的自愈入口）"; exit 1; }
+          done
+          _n_sh=$(find "${{ github.workspace }}/files/usr/sbin" -type f -name '*.sh' | wc -l)
+          echo "==> files/usr/sbin 全树 .sh 共 $_n_sh 个（含 bootstrap/smartdns/adblock 子目录）"
 
       # 先把 runner 自带、本构建完全用不到的工具链删掉。
       # 实测 GitHub 托管 runner 是 146G 盘（不是文档里说的 14G），清完剩 109G 可用，
@@ -261,7 +276,7 @@ jobs:
           # 极简 rootfs 阶段：容器能不能起来，全看这几个 shell 脚本。
           # 语法错误拖到 make image 之后才炸要等一小时，这里 10 秒就拦住。
           for f in shell/prepare-crowdsec-minimal.sh \
-                   files/usr/sbin/crowdsec-lxc-bootstrap.sh \
+                   files/usr/sbin/bootstrap/bootstrap.sh \
                    files/etc/rc.local \
                    files/etc/uci-defaults/99-custom.sh; do
             bash -n "$f" || { echo "::error::$f 语法错误"; exit 1; }
