@@ -52,14 +52,16 @@ _pr_installed() {
 
 # 记账说已装、文件却不在的情形（手删二进制，包仍在册）。
 #   判据覆盖「可执行 / init / 共享库」五类 —— 它们缺了包一定跑不起来；
-#   另加 lxc 专有四类 /sbin、/etc/lxc、/usr/share/lxc、/usr/lib/lxc：
+#   【2026-11-09】另加 lxc 专有四类 /sbin、/etc/lxc、/usr/share/lxc、/usr/lib/lxc：
 #   /sbin/init.lxc 是容器 PID1，缺了 lxc-start 报 Failed to exec、容器起不来，
 #   而它落在前五类之外 —— 冒烟与旧清单都判不出（2026-11-09 真机确认）。
 #   /sbin/* 共 58 条（init / procd / netifd / uci / fw4 …）、/etc/lxc/* 3 条、
 #   /usr/share/lxc/config/* 6 条 + lxc.functions（templates / hooks 不保：
 #   只在建容器或配置里启用 hook 时才用，运行不需要）。
-#   /usr/share、/etc/config 一律不看：conffiles 允许用户改动，缺失不等于包坏，
+#   /etc/config 一律不看：conffiles 允许用户改动，缺失不等于包坏，
 #   拿它当判据会把「用户改过配置」误判成「包坏了」，每轮重装一次、刷 flash。
+#   【2026-11-08】/usr/share 也基本不看，但 geo 四包例外（见下方 case）：
+#   它们是包内数据不是配置，删了分流直接走错，必须能判出来。
 #   工具：opkg 的安装清单 /rom/usr/lib/opkg/info/<pkg>.list 是文本，逐行可读；
 #   apk（25.12）的清单在二进制 installed.adb 里，取不到 → 直接放行，维持原行为。
 #   取 /rom 侧而不是运行侧：opkg remove 会把运行侧的 .list 一起删掉，
@@ -83,6 +85,14 @@ _pr_files_ok() {
             /sbin/*|/etc/lxc/*|/usr/lib/lxc/*) ;;
             # 容器 config 直接 lxc.include 的模板；templates / hooks 不保
             /usr/share/lxc/config/*|/usr/share/lxc/lxc.functions) ;;
+            # 【2026-11-08】geo 数据单独列出，精确四条，不放开 /usr/share/*：
+            #   · 它们不是用户配置，是包内数据；删了分流直接走错；
+            #   · 原 case 看不见它们，于是「包在册、.dat 被删」判成「文件齐」，
+            #     走「已安装，跳过」，永远修不回来（与 _pa_repair 那个 bug 同源）；
+            #   · 不写 /usr/share/* 是因为 lxc 等包的 .list 里也有 /usr/share 路径，
+            #     笼统放开会把「用户改过模板」判成「包坏了」，每轮重装刷 flash。
+            /usr/share/v2ray/geoip.dat|/usr/share/v2ray/geosite.dat) ;;
+            /usr/share/daed/geoip.dat|/usr/share/daed/geosite.dat) ;;
             *) continue ;;
         esac
         [ -e "$PKGROOT$_pfo_f" ] || return 1
@@ -341,9 +351,22 @@ _DEPS_ROM_LIST="$ROMDIR/lib/apk/packages"
 # （后者 apk info -e 看得见，直接 PCR_FORCE 重装、记账一起回来）。
 # 老固件没装这个包时 /rom 里没有它的 .list，本表第一行 [ -f ] 直接跳过，
 # 零动作零日志 —— 不会把「没带这个包的固件」误判成缺件。
+# 【2026-11-10】补 honk 的依赖链缺口（实测 apk info -R honk 列出来的）：
+#   kmod-nf-conntrack / kmod-nfnetlink-queue / kmod-nft-core / kmod-nft-queue
+#   libstdcpp6
+# 之前这 5 个只在 honk 装上时才由包管理器带进来，被 apk del 掉之后没有任何
+# 通道能把文件拉回来 —— libstdcpp6 缺了 honk 直接起不来（C++ 运行库），
+# 四个 nft/conntrack 模块缺了规则下发不下去。
+# /rom 侧清单实测：5 条 / 2 条 / 13 条 / 2 条 / 2 条，逐条 [ -e ] 全在位，
+# 所以走逐路径恢复是有效的。
+#
+# 不加 vmlinux-btf：实测它只含 lib/apk/packages/vmlinux-btf-builtin.list 一个文件，
+# BTF 数据由内核在 /sys/kernel/btf/vmlinux 运行时生成，没有实体文件要护。
 _DEPS_PKGS="kmod-dummy kmod-nft-socket kmod-nft-tproxy kmod-sched-bpf
-kmod-sched-core kmod-veth kmod-inet-diag kmod-tun kmod-netlink-diag kmod-zram
-ca-bundle libcap yq ip-full firewall4 coreutils-nohup coreutils-timeout libopenssl3
+kmod-sched-core kmod-veth kmod-inet-diag kmod-tun kmod-netlink-diag
+kmod-xdp-sockets-diag kmod-zram
+kmod-nf-conntrack kmod-nfnetlink-queue kmod-nft-core kmod-nft-queue
+ca-bundle libcap yq ip-full firewall4 coreutils-nohup coreutils-timeout libopenssl3 libstdcpp6
 v2ray-geoip v2ray-geosite"
 
 # 输出「基底有、运行侧缺或为空」的绝对路径。返回 2 = 基底里一份清单都没有。
