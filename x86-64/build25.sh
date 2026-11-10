@@ -1,5 +1,5 @@
 #!/bin/bash
-# 【2026-11-10】固件版本标记 —— 与 bootstrap/bootstrap.sh 的 SCRIPT_VER 同步，每次改脚本一起改
+# 【2026.11.10】固件版本标记 —— 与 bootstrap/_lib.sh 的 SCRIPT_VER 同步，每次改脚本一起改
 source shell/apk-custom-packages.sh
 echo "第三方apk软件包: $CUSTOM_PACKAGES"
 LOGFILE="/tmp/uci-defaults-log.txt"
