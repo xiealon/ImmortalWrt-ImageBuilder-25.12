@@ -423,6 +423,12 @@ _up_svc() {
 _run_fix() {
     # 先保证要跑的东西在：不在就什么都别谈。返回 78 与抢锁失败的 77 区分开 ——
     # 两者的日志和处置完全不同（一个是「等下一轮」，一个是「要重刷固件」）。
+    #
+    # 【2026-11-10】$1 透传给 bootstrap.sh。原来这里一律不带参数，等于走
+    # bootstrap.sh 的默认模式（检测 → 只修不过的 → 复检），而那条路**不写
+    # installed 标记** —— installed 只在 main.sh 跑到最后（_stamp_write）才写。
+    # 所以「补印」那条路无论跑多少次都补不上，探针会一直在 restamp-fail 上打转。
+    _rf_arg="${1:-}"
     _ensure_boot || return 78
     if ! mkdir "$LOCK" 2>/dev/null; then
         plog "【持锁失败】并发占用，本轮放弃"
@@ -430,7 +436,8 @@ _run_fix() {
     fi
     # 后台起 bootstrap 并立刻把「它的」pid 写进锁：陈旧判定的依据必须是持有者，
     # 不是探针自己 —— 否则探针被重启时会把一个仍在跑着的 bootstrap 判成陈旧。
-    _boot >>"$BOOT_LOG" 2>&1 &
+    # shellcheck disable=SC2086
+    _boot $_rf_arg >>"$BOOT_LOG" 2>&1 &
     _rf_pid=$!
     echo "$_rf_pid" > "$LOCK/pid" 2>/dev/null
     date +%s > "$LOCK/ts" 2>/dev/null
@@ -796,8 +803,8 @@ probe_tick() {
         fi
         P_LAST_TRIG="$_rs_now"
         P_ACTION="restamp"
-        plog "【补印】installed 缺失但容器 rootfs 已就绪（$ROOTFS），持锁重跑引导补印"
-                _run_fix
+        plog "【补印】installed 缺失但容器 rootfs 已就绪（$ROOTFS），持锁重跑引导（--full）补印"
+                _run_fix --full
         _rs_rc=$?
         if [ "$_rs_rc" = 78 ]; then
             P_ACTION="boot-missing"
