@@ -1,7 +1,11 @@
 #!/bin/sh
 # smartdns/05-upstream.sh —— 步骤⑤：写上游 6 条（全清重建）
 #
-# 拆分自 pkg-restore-smartdns.sh 的 _sd_cfg_upstream()。表内容一字未改。
+# 拆分自 pkg-restore-smartdns.sh 的 _sd_cfg_upstream()。
+#
+# 【2026-11-10】表内容移到 _lib.sh 的 sd_upstream_table()：本脚本写什么、
+# _sd_upstream_ok() 判什么，必须取自同一份表。原来表只存在于这里的 heredoc，
+# 判定那边要么再抄一遍（抄错就是「修完仍判不符」的死循环），要么没得判。
 #
 # 口径（用户 2026-11-07 定）：先把所有 server 段删光，再按表逐条新建。
 # 理由是「防止错误配置遗留」—— 按 IP 找段修正 + 淘汰黑名单那套自相矛盾：
@@ -15,10 +19,27 @@
 # 不能「预先展开列表再逐个删」—— 删掉 @server[0] 后其余整体前移一格，
 # 8 段那样只会删掉 4 段、留下原 1/3/5/7，而末尾 -eq 6 只数表内行、照样通过。
 #
-# 退出码：0 写入成功 / 1 失败
+# 用法：
+#   ./05-upstream.sh --check   只判，一个字节不写（0 对 / 1 不对）
+#   ./05-upstream.sh           清空重建
+#
+# 退出码：0 成功 / 1 失败 / 2 用法错误
 
 _here=$(cd "$(dirname "$0")" && pwd)
 . "$_here/_lib.sh"
+
+case "${1:-}" in
+--check)
+    _sd_upstream_ok
+    exit $?
+    ;;
+"")
+    ;;
+*)
+    echo "用法：$0 [--check]" >&2
+    exit 2
+    ;;
+esac
 
 # 守门①：uci 读不出来就什么都别做。否则「一条都没取到」会被当成
 # 「本来就没有旧段」，接着 add 6 条 —— 6 条新的叠在 N 条旧的上，
@@ -40,6 +61,15 @@ _sdc_left=$(uci -q show smartdns 2>/dev/null | grep -c '=server$')
 case "$_sdc_left" in ''|*[!0-9]*) _sdc_left=-1 ;; esac
 [ "$_sdc_left" = "0" ] || {
     log "旧上游未清干净（剩 $_sdc_left 条），不接管 DNS"
+    exit 1
+}
+
+# 表先落临时文件再 while 读，不走管道：
+# 管道会把 while 放进子 shell，_sdc_n 的计数出不来，末尾 -eq 6 永远判失败。
+_sdc_tab="${TMPDIR:-/tmp}/.sd_upstream.$$"
+sd_upstream_table > "$_sdc_tab" 2>/dev/null || {
+    log "取上游表失败，不接管 DNS"
+    rm -f "$_sdc_tab"
     exit 1
 }
 
@@ -65,21 +95,8 @@ while read -r _sdc_name _sdc_ip _sdc_tp _sdc_grp _sdc_host; do
         uci -q delete "smartdns.$_sdc_hit.host_name" 2>/dev/null
     fi
     _sdc_n=$((_sdc_n + 1))
-done <<'SD_UPSTREAM_EOF'
-# 【2026-11-07】CN 组改 DoT：实测本链路 TCP 53 被干扰（阿里/腾讯连上即 RST、
-# 百度 SYN 无回应），而 853 端口可达且解析正常（91 B，与 UDP 同长）。
-# 只有这 3 条实测可用：阿里 2 条、腾讯 1 条（dot.pub → 120.53.53.53）。
-# 百度 / 360 / CNNIC 的 853 不通或解析失败，全部淘汰。
-alidns 223.5.5.5 tls CN dns.alidns.com
-alidns 223.6.6.6 tls CN dns.alidns.com
-dnspod 120.53.53.53 tls CN dot.pub
-google 8.8.8.8 tls out dns.google
-# out 组：honk 开着时才可达（8.8.8.8 的 853/443、dns.google 的 DoH、
-# cloudflare 的 DoH 都能真解析出 91 B；cloudflare 的 853 与 1.1.1.1 的 DoT 均为 0 B）。
-# DoH 必须写域名，用 IP 形式（https://8.8.8.8/dns-query）实测 0 B 失败。
-google https://dns.google/dns-query https out dns.google
-cloudflare https://cloudflare-dns.com/dns-query https out cloudflare-dns.com
-SD_UPSTREAM_EOF
+done < "$_sdc_tab"
+rm -f "$_sdc_tab"
 
 [ "$_sdc_n" -eq 6 ] || { log "上游按表处理条数异常（$_sdc_n ≠ 6），不接管 DNS"; exit 1; }
 

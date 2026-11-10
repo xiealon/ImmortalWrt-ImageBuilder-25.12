@@ -24,30 +24,10 @@
 _here=$(cd "$(dirname "$0")" && pwd)
 . "$_here/_lib.sh"
 
-# 规则文件「基座有、运行期没有」就算不完整。0=齐，1=缺。
-# 只看「基座有、运行期没有」：基座本来就没有的（老固件没编这些规则）不算缺，
-# 否则每轮都判坏、又永远补不回来，只会把通道锁死在 warn。
-_sd_conf_ok() {
-    _sc_miss=0
-    for _sc_f in $SD_CONF_FILES; do
-        [ -e "$ROMDIR/etc/smartdns/$_sc_f" ] || continue
-        if [ ! -e "$PKGROOT/etc/smartdns/$_sc_f" ]; then
-            printf '[PKG] 缺规则文件：/etc/smartdns/%s\n' "$_sc_f" >&2
-            _sc_miss=1
-        fi
-    done
-    [ "$_sc_miss" = 0 ]
-}
-
-_sd_localrule_ok() {
-    if [ ! -f "$PKGROOT/etc/smartdns/custom.conf" ]; then
-        printf '[PKG] 缺文件：/etc/smartdns/custom.conf\n' >&2
-        return 1
-    fi
-    grep -qxF "$_SD_LOCALRULE" "$PKGROOT/etc/smartdns/custom.conf" 2>/dev/null && return 0
-    printf '[PKG] 缺 localhost 本地解析：/etc/smartdns/custom.conf\n' >&2
-    return 1
-}
+# 判定函数统一由 _lib.sh 提供（_sd_conf_ok / _sd_localrule_ok / _sd_cfg_ok /
+# _sd_upstream_ok / _sd_serve / _sd_pkg_ok）。2026-11-10 把这里的本地副本删掉：
+# 同一份判据存在两处，改一处忘另一处，就成了「检测通过但修复不认」——
+# 本文件是探针门票，判据必须与各步骤 --check 用同一份。
 
 case "${1:-}" in
 --pkg)
