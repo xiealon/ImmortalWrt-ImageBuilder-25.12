@@ -131,7 +131,7 @@ rm -rf "$LOCK" 2>/dev/null
 #   口径因此统一为「一条上游都没有才恢复 6 条」：手工删过几条的用户，
 #   重启后不会被强制补回 6 条（此前是无条件重写，与探针口径正好相反）。
 # 失败不判死：探针在「DNS 不正常」连续 3 轮、且冷却闸门通过时会自己再调 --config。
-SD_RESTORE=/rom/usr/sbin/smartdns/restore.sh
+SD_RESTORE=/rom/usr/sbin/smartdns-restore/restore.sh
 if [ -x "$SD_RESTORE" ]; then
     SD_UP_N=$(uci -q show smartdns 2>/dev/null | grep -c '=server$')
     case "$SD_UP_N" in '' | *[!0-9]*) SD_UP_N=0 ;; esac

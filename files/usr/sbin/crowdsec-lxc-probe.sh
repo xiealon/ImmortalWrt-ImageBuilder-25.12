@@ -368,7 +368,7 @@ _up_n() {
 # 现在统一走 --repair：它内部第一步就是 _sd_conf 补文件，再重写主段与 6 条上游、
 # commit 并重启。代价从「补文件后约 2 秒」变成「完整流程约 15 秒」，但只在
 # 连续 N 轮不可用且冷却闸门通过之后触发，不会每分钟来一次。
-_SD_RESTORE="${CS_PROBE_SD_RESTORE:-$SROOT/usr/sbin/smartdns/restore.sh}"
+_SD_RESTORE="${CS_PROBE_SD_RESTORE:-$SROOT/usr/sbin/smartdns-restore/restore.sh}"
 
 # 跑脚本的一个子命令。输出转 syslog（标签与探针分开，排障时能分清谁说的）。
 # 【v.180.198】不再做「53 现场复验」：复验函数随 53 体检一起删除。
