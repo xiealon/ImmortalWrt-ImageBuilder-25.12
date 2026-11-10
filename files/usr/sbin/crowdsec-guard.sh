@@ -127,11 +127,9 @@ SCRIPT_VER="2026-11-09.2130"
 # 记账与依赖树：逐字节盖回二进制会绕开包管理器，留下「文件是 guard 盖的、
 # 记账说没装」的状态，LuCI 与后续 apk/opkg 操作都会读错。
 GUARD_FILES="${CS_GUARD_FILES:-
-/usr/sbin/crowdsec-lxc-bootstrap.sh
 /usr/sbin/crowdsec-lxc-probe.sh
 /usr/sbin/crowdsec-guard.sh
 /usr/sbin/pkg-restore.sh
-/usr/sbin/pkg-restore-smartdns.sh
 /usr/sbin/pkg-restore-apps.sh
 /usr/sbin/pkg-cache-lib.sh
 /usr/sbin/pkg-cache-fix.sh
@@ -155,7 +153,12 @@ GUARD_FILES="${CS_GUARD_FILES:-
 # 整目录做一次清单比对，不一致就整目录换回，一处逻辑管到底。
 #
 # 旧固件 /rom 里没有这个目录 —— 下面循环第一行判 -d 就跳过，零动作、零日志。
-GUARD_DIRS="${CS_GUARD_DIRS:-/usr/share/crowdsec-tests}"
+# 【2026-11-10】拆分出来的三个目录整目录纳入保护。
+# 为什么不逐个列进 GUARD_FILES：33 个文件，将来加一个就得回来补一行，迟早漏；
+# 逐文件的 write 还会给每个文件留一份 .user-<时间戳> 备份，几十份在 flash 上太费。
+# 本段是整目录一次签名比对，不一致就整目录换回，一处逻辑管到底。
+# 目录里的 .sh 若被删/被改/丢执行位，60 秒内被 /rom 那版盖回（cp -a 保留权限位）。
+GUARD_DIRS="${CS_GUARD_DIRS:-/usr/share/crowdsec-tests /usr/sbin/bootstrap /usr/sbin/smartdns /usr/sbin/adblock}"
 
 # 【v.108.45】容器内脚本也纳入保护，但单独一组：它们的目标在容器 rootfs 里，
 # 恢复动作必须多两道门（见 _ct_gate），不能和宿主侧混在一个循环里无条件执行。
