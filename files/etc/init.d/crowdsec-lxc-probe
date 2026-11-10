@@ -19,12 +19,10 @@ USE_PROCD=1
 start_service() {
     # 起服务前先复原核心脚本。本文件自己也在保护表里，被改过时靠 rc.local 和探针补回；
     # guard 不负责它自己（被改成 exit 0 就什么都不会复原），所以调用前先自举。
-    local _g=/usr/sbin/crowdsec-guard.sh
-    if [ -f "/rom$_g" ] && ! cmp -s "/rom$_g" "$_g" 2>/dev/null; then
-        rm -f "$_g"
-        cp -f "/rom$_g" "$_g" 2>/dev/null
-        chmod 755 "$_g" 2>/dev/null
-    fi
+    # 【2026-11-10】guard 已改为直接从 /rom 执行（squashfs 只读分区，改不了、
+    # 删不掉），原来的「先把它从 /rom 自举到 /usr/sbin 再调用」整段删掉。
+    # 保留那段只在运行侧有副本时才有意义，而现在除了探针本身没有别的副本。
+    local _g=/rom/usr/sbin/crowdsec-guard.sh
     # 【v.108.67】加硬顶：guard 自身有 3 次 attach × 10s，正常几百 ms；
     # 卡住时不能让 procd 的 start_service 一起挂着（那会连探针都起不来）。
     # 【2026-11-10.0432】固件里没有 timeout 时直接跑：guard 自身有 3 次 attach × 10s
