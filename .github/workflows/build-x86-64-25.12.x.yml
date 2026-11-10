@@ -173,7 +173,7 @@ jobs:
               || { echo "::error::$_x 无执行位（拆分后的自愈入口）"; exit 1; }
           done
           _n_sh=$(find "${{ github.workspace }}/files/usr/sbin" -type f -name '*.sh' | wc -l)
-          echo "==> files/usr/sbin 全树 .sh 共 $_n_sh 个（含 bootstrap/smartdns/adblock 子目录）"
+          echo "==> files/usr/sbin 全树 .sh 共 $_n_sh 个（含 bootstrap/smartdns-restore/adblock 子目录）"
 
       # 先把 runner 自带、本构建完全用不到的工具链删掉。
       # 实测 GitHub 托管 runner 是 146G 盘（不是文档里说的 14G），清完剩 109G 可用，
