@@ -128,6 +128,7 @@ SCRIPT_VER="2026-11-09.2130"
 # 记账说没装」的状态，LuCI 与后续 apk/opkg 操作都会读错。
 GUARD_FILES="${CS_GUARD_FILES:-
 /usr/sbin/crowdsec-lxc-probe.sh
+/usr/sbin/crowdsec-guard-watch.sh
 /usr/sbin/crowdsec-guard.sh
 /usr/sbin/pkg-restore.sh
 /usr/sbin/pkg-restore-apps.sh
@@ -235,6 +236,30 @@ ROOTFS="${CS_GUARD_ROOTFS:-$ROOT$GUARD_CT_PREFIX}"
 
 QUIET=0
 [ "$1" = "quiet" ] && QUIET=1
+
+# 【2026-11-10】并发保护。现在有两个入口调 guard：
+#   ① 探针主循环（每 600 秒）  ② cron 每 2 分钟调 crowdsec-guard-watch.sh
+# 两边必然撞上。而恢复动作是 rm -rf + mv + cp -a，两个实例同时做会把
+# 备份目录互相踩掉（一个刚 mv 走，另一个 cp -a 到不存在的目标）。
+# mkdir 是原子操作，拿不到就跳过本轮 —— guard 每一段都幂等，
+# 跳过一轮不会漏掉任何修复，下一轮 120 秒后仍会做。
+# 锁里写 PID：持锁进程已死（被 KILL / 掉电）就清掉重拿，避免死锁。
+_GUARD_LOCK="${CS_GUARD_LOCK:-/tmp/.crowdsec-guard.lock}"
+_gl_take=0
+if mkdir "$_GUARD_LOCK" 2>/dev/null; then
+    _gl_take=1
+else
+    _gl_pid=""
+    _gl_pid=$(cat "$_GUARD_LOCK/pid" 2>/dev/null)
+    if [ -n "$_gl_pid" ] && kill -0 "$_gl_pid" 2>/dev/null; then
+        exit 0
+    fi
+    rm -rf "$_GUARD_LOCK" 2>/dev/null
+    mkdir "$_GUARD_LOCK" 2>/dev/null && _gl_take=1
+fi
+[ "$_gl_take" = "1" ] || exit 0
+printf '%s' "$$" >"$_GUARD_LOCK/pid" 2>/dev/null
+trap 'rm -rf "$_GUARD_LOCK" 2>/dev/null' EXIT INT TERM HUP
 
 # 日志 64KB 封顶：正常情况一条都不写；被反复篡改时每轮一行，不封顶会一直涨下去。
 # 超限就只留最后 200 行（约 20KB），封顶之后长期占用不再增长。

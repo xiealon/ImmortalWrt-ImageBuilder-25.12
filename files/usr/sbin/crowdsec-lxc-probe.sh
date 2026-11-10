@@ -192,6 +192,25 @@ _boot() {
 # 必须排在 probe_tick 之前：bootstrap 持锁时 tick 会走 lock-busy 提前返回，
 # 完整性检查不能跟着停摆 —— 那正好是"脚本正在被用"的时候。
 # guard 不负责它自己（被改成 exit 0 就什么都不会复原），所以调用前先自举。
+# 【2026-11-10】维护 guard 的独立触发：cron 每 2 分钟调 crowdsec-guard-watch.sh。
+# 探针主循环是 600 秒，目录完整性检查不该被它拖慢到 10 分钟 —— 拆出来单独触发，
+# 两个频率从此互不牵制：目录 120 秒、探测 600 秒。
+# 这里只保证 crontab 那行在（幂等，一次 grep 约 3ms），调度交给 cron。
+# 放在 _guard_run 里而不是只放启动时：crontab 被清空也能在下一轮补回来。
+_ensure_guard_cron() {
+    [ -x /usr/sbin/crowdsec-guard-watch.sh ] || return 0
+    _egc_f=/etc/crontabs/root
+    [ -f "$_egc_f" ] || mkdir -p /etc/crontabs 2>/dev/null
+    grep -qF '/usr/sbin/crowdsec-guard-watch.sh' "$_egc_f" 2>/dev/null && return 0
+    printf '%s\n' '*/2 * * * * /usr/sbin/crowdsec-guard-watch.sh' >>"$_egc_f" 2>/dev/null || return 1
+    # 不 reload、不 restart：
+    #   · 本固件的 /etc/init.d/cron 里**没有 reload 动作**（实测 grep -c reload = 0）；
+    #   · restart 会打断正在执行的任务 —— acme renew 排在 0 点整，正好撞上；
+    #   · busybox crond（/usr/sbin/crond -f -c /etc/crontabs）本身每分钟重扫目录，
+    #     写进去最多 1 分钟就生效，不需要额外动作。
+    return 0
+}
+
 _guard_run() {
     if [ -f "/rom$GUARD" ] && ! cmp -s "/rom$GUARD" "$GUARD" 2>/dev/null; then
         rm -f "$GUARD"
@@ -201,6 +220,7 @@ _guard_run() {
     # 【v.180.119】bootstrap 同口径复原：每轮查，与本函数的 guard 同一时机 ——
     # tick 遇到 lock-busy 会提前返回，完整性检查不能跟着停摆。
     _ensure_boot || :
+    _ensure_guard_cron || :
     [ -x "$GUARD" ] && _cap "$PROBE_GUARD_MAX" "$GUARD" quiet
     return 0
 }
