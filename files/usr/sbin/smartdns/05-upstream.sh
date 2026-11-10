@@ -104,5 +104,5 @@ rm -f "$_sdc_tab"
 
 [ "$_sdc_n" -eq 6 ] || { log "上游按表处理条数异常（$_sdc_n ≠ 6），不接管 DNS"; exit 1; }
 
-log "上游 6 条已写：CN 3 DoT（阿里×2 / 腾讯 dot.pub）+ out 1 DoT（google）+ 2 DoH（google / cloudflare）"
+log "上游 6 条已写：CN 组 2 DoH（阿里 / doh.pub）+ 2 DoT（阿里 / dot.pub），out 组 2 DoH（google / cloudflare）"
 exit 0

@@ -133,7 +133,7 @@ if [ -z "$_fixed" ]; then
     log "全部步骤达标，未改动任何配置，DNS 未中断"
 else
     log "本次修复：$_fixed"
-    log "smartdns 已接管 DNS：6 条上游（国内 3 DoT / 境外 2 DoH+1 DoT），dnsmasq 由 init 让出 53"
+    log "smartdns 已接管 DNS：6 条上游（国内 2 DoH + 2 DoT，境外 2 DoH），dnsmasq 由 init 让出 53"
     log "localhost 本地解析在位：adblock 的 nslookup localhost. 探活可通过"
 fi
 exit 0

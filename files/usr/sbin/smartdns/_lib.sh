@@ -86,17 +86,28 @@ _sd_discard() {
 # 05-upstream.sh 按它写入，_sd_upstream_ok 按它比对 —— 同一份表，不会漂移。
 sd_upstream_table() {
     cat <<'SD_UPSTREAM_EOF'
-# 【2026-11-07】CN 组改 DoT：实测本链路 TCP 53 被干扰（阿里/腾讯连上即 RST、
-# 百度 SYN 无回应），而 853 端口可达且解析正常（91 B，与 UDP 同长）。
-# 只有这 3 条实测可用：阿里 2 条、腾讯 1 条（dot.pub → 120.53.53.53）。
-# 百度 / 360 / CNNIC 的 853 不通或解析失败，全部淘汰。
+# 【2026-11-10】用户定：国内每家配 DoH + DoT 双路，国外只留 DoH。
+#
+# 为什么国内要双协议：
+#   443（DoH）与 853（DoT）是两条独立链路。运营商只干扰其中一条时，另一条还在；
+#   阿里、腾讯各自又有两套接口，同一家出问题也不影响另一家。原来 3 条全是 DoT，
+#   443 那条路完全没用上 —— 实测它是通的。
+#
+# 为什么国外只留 DoH：
+#   8.8.8.8:853 只有在 honk 开着时才可达，单点价值低；DoH 走 443，与代理复用
+#   同一条出口，反而更稳。
+#
+# 实测（2026-10-29，设备 10.0.0.201）：
+#   443   四家 DoH 全部 TLS 握手成功、JSON 解析 Status:0，单次约 0.14 s
+#         （阿里 CN=*.alidns.com / 腾讯 CN=*.doh.pub）
+#   853   阿里 TLSv1.3、腾讯 TLSv1.2，解析正常
+#   TCP 53 仍被干扰（阿里/腾讯连上即 RST、百度 SYN 无回应），所以不用
+#
+# DoH 必须写域名：用 IP 形式（https://8.8.8.8/dns-query）实测 0 B 失败。
+alidns https://dns.alidns.com/dns-query https CN dns.alidns.com
 alidns 223.5.5.5 tls CN dns.alidns.com
-alidns 223.6.6.6 tls CN dns.alidns.com
+dnspod https://doh.pub/dns-query https CN doh.pub
 dnspod 120.53.53.53 tls CN dot.pub
-google 8.8.8.8 tls out dns.google
-# out 组：honk 开着时才可达（8.8.8.8 的 853/443、dns.google 的 DoH、
-# cloudflare 的 DoH 都能真解析出 91 B；cloudflare 的 853 与 1.1.1.1 的 DoT 均为 0 B）。
-# DoH 必须写域名，用 IP 形式（https://8.8.8.8/dns-query）实测 0 B 失败。
 google https://dns.google/dns-query https out dns.google
 cloudflare https://cloudflare-dns.com/dns-query https out cloudflare-dns.com
 SD_UPSTREAM_EOF
