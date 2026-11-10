@@ -194,29 +194,45 @@ _boot() {
     _cap "$_BOOT_MAX" "$BOOT" "$@"
 }
 
-# ---- 核心脚本完整性：每轮先复原被改动的脚本，再判定 last_pull ----
-# 必须排在 probe_tick 之前：bootstrap 持锁时 tick 会走 lock-busy 提前返回，
-# 完整性检查不能跟着停摆 —— 那正好是"脚本正在被用"的时候。
-# guard 不负责它自己（被改成 exit 0 就什么都不会复原），所以调用前先自举。
 # 【2026-11-10】维护 guard 的独立触发：cron 每 2 分钟调 crowdsec-guard-watch.sh。
 # 探针主循环是 600 秒，目录完整性检查不该被它拖慢到 10 分钟 —— 拆出来单独触发，
 # 两个频率从此互不牵制：目录 120 秒、探测 600 秒。
-# 这里只保证 crontab 那行在（幂等，一次 grep 约 3ms），调度交给 cron。
-# 放在 _guard_run 里而不是只放启动时：crontab 被清空也能在下一轮补回来。
+#
+# 判据是「整行精确匹配」而不是「子串存在」：
+#   原来用 grep -qF 只判路径在不在，于是把 */2 改成 */5 也照样算通过
+#   （路径没变、时间变了），自愈频率被悄悄降了 2.5 倍却没人知道。
+#   现在用 grep -qxF 比整行，不一致就把所有指向 guard-watch 的旧行删掉重写。
+#
+# 同时确保 crond 在跑：crontab 写得再对，crond 被 stop/disable 也等于没配。
 _ensure_guard_cron() {
     [ -x "$SROOT/usr/sbin/crowdsec-guard-watch.sh" ] || return 0
     _egc_f=/etc/crontabs/root
-    [ -f "$_egc_f" ] || mkdir -p /etc/crontabs 2>/dev/null
-    grep -qF "$SROOT/usr/sbin/crowdsec-guard-watch.sh" "$_egc_f" 2>/dev/null && return 0
-    printf '%s\n' "*/2 * * * * $SROOT/usr/sbin/crowdsec-guard-watch.sh" >>"$_egc_f" 2>/dev/null || return 1
-    # 不 reload、不 restart：
-    #   · 本固件的 /etc/init.d/cron 里**没有 reload 动作**（实测 grep -c reload = 0）；
-    #   · restart 会打断正在执行的任务 —— acme renew 排在 0 点整，正好撞上；
-    #   · busybox crond（/usr/sbin/crond -f -c /etc/crontabs）本身每分钟重扫目录，
-    #     写进去最多 1 分钟就生效，不需要额外动作。
+    _egc_line="*/2 * * * * $SROOT/usr/sbin/crowdsec-guard-watch.sh"
+
+    # ① 整行精确匹配；不一致就清掉所有 guard-watch 旧行再写
+    if ! grep -qxF "$_egc_line" "$_egc_f" 2>/dev/null; then
+        mkdir -p /etc/crontabs 2>/dev/null
+        if [ -f "$_egc_f" ]; then
+            # 用 cat 写回而不是 mv：/etc/crontabs/root 可能被 bind mount，
+            # 单文件 bind mount 上 rename 会撞 "Device or resource busy"。
+            grep -v 'crowdsec-guard-watch.sh' "$_egc_f" > "$_egc_f.tmp" 2>/dev/null
+            [ -f "$_egc_f.tmp" ] && cat "$_egc_f.tmp" > "$_egc_f" 2>/dev/null
+            rm -f "$_egc_f.tmp"
+        fi
+        printf '%s\n' "$_egc_line" >>"$_egc_f" 2>/dev/null || return 1
+        # 不 reload、不 restart cron：
+        #   · 本固件 /etc/init.d/cron 里没有 reload 动作；
+        #   · restart 会打断正在执行的任务（acme renew 排在 0 点整）；
+        #   · busybox crond 每分钟重扫目录，写进去最多 1 分钟生效。
+    fi
+
+    # ② crond 必须活着。被 stop / disable 时 crontab 等于摆设。
+    if ! pidof crond >/dev/null 2>&1; then
+        /etc/init.d/cron enable >/dev/null 2>&1
+        /etc/init.d/cron start >/dev/null 2>&1
+    fi
     return 0
 }
-
 _guard_run() {
     if [ -f "/rom$GUARD" ] && ! cmp -s "/rom$GUARD" "$GUARD" 2>/dev/null; then
         rm -f "$GUARD"
