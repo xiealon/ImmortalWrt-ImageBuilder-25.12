@@ -167,7 +167,7 @@ jobs:
             || { echo "::error::files/etc/rc.local 仍无执行位，开机不会跑任何引导"; exit 1; }
           for _x in files/usr/sbin/bootstrap/bootstrap.sh \
                     files/usr/sbin/crowdsec-guard-watch.sh \
-                    files/usr/sbin/smartdns/restore.sh \
+                    files/usr/sbin/smartdns-restore/restore.sh \
                     files/usr/sbin/adblock/restore.sh; do
             [ -x "${{ github.workspace }}/$_x" ] \
               || { echo "::error::$_x 无执行位（拆分后的自愈入口）"; exit 1; }
