@@ -238,6 +238,27 @@ build_bouncer_verify() {
     # 处置顺序：先确保服务在跑（进程没起来时重签毫无意义），再重签，再给同样的 60s。
     log "[bouncer] last_pull 60s 未刷新：先确保宿主机 bouncer 在跑，再按「key 可能已失配」重签后复验"
     _ensure_bouncer_service
+    # 【2026-11-11】服务刚被拉起来时还来不及 pull —— 补一个短等待窗口再判 key。
+    # 真机 16:05 重启现场：BOUNCERVERIFY 在 16:05:20 开始检查，而
+    # crowdsec-firewall-bouncer 的 init 脚本启动晚于本组，前 60 秒根本没有进程在 pull，
+    # last_pull 自然不刷新 -> 被判「key 可能失配」-> 白跑一次 bouncers delete/add
+    # + 服务重启，多花 83 秒。实际上服务一拉起（16:06:35「已生效」）就能自己刷新。
+    # 30 秒的依据：update_frequency=10s，三次拉取周期足够；真坏 key 时最多多等这 30 秒，
+    # 探针还有 10 分钟一轮的兜底。
+    #
+    # 注意这是同步阻塞：循环内 sleep 5s x 最多 6 轮，只有两种情况会离开 ——
+    #   ① verify 通过 -> return 0，整个函数成功返回，不再重签；
+    #   ② 30 秒跑完都不通过 -> 落到下面 _force_resign_bouncer。
+    # 不存在「等待没生效、后面直接过去」。
+    _w=0
+    while [ "$_w" -lt 30 ]; do
+        if verify_bouncer_verify; then
+            log "[bouncer] 服务拉起后 last_pull 已自行刷新，无需重签 api_key"
+            return 0
+        fi
+        sleep "$SLEEP" 2>/dev/null || sleep 1
+        _w=$((_w + SLEEP))
+    done
     if _force_resign_bouncer; then
         _w=0
         while [ "$_w" -lt 60 ]; do
