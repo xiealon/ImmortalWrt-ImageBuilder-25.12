@@ -46,26 +46,19 @@ _lxc_net() {
 
 _lan_ip() {
     # SNAT 的目标地址 = 路由器在 LAN 上的管理 IP。
-    #
-    # 【2026-11-11 用户方案】优先读内核里 br-lan 的真实地址，不再优先读 uci 配置。
-    # 理由：build_snat 已经先把「配置」对齐到「内核」（见该函数开头：配置与内核不一致
-    # 时先 commit + reload network）。对齐之后两边应当是同一个值，此时读内核最实在 ——
-    # 它是 fw4 重建 nft 时真正会拿来用的那个地址。
-    # 而如果仍然优先读配置，遇到「有人手改配置但没 reload」就会出现：
-    # snat_ip 写成新值、fw4 也按新值建规则，可路由器的 br-lan 还是旧地址 ——
-    # 规则指向一个尚未生效的 IP，容器出网直接断，而日志上看一切正常。
-    #
-    # 四级来源，越靠前越优先：
-    #   ① br-lan 的真实地址（内核事实）
-    #   ② uci network.lan.ipaddr（br-lan 还没建 / 还没 IP 的极早期场景）
-    #   ③ /etc/config/custom_router_ip.txt（用户显式声明）
-    #   ④ 写死的 10.0.0.201（最后兜底，保证永远返回可用地址）
-    _si=$(run ip -4 addr show br-lan 2>/dev/null | sed -n 's/.*inet \([0-9][0-9.]*\)\/.*/\1/p' | head -n1)
+    # 优先读 uci network.lan.ipaddr：它由 build_lan_static 写入并当场 commit，
+    # 是「fw4 reload 之后最终会生效、且 nft 规则会按它生成」的那个值 —— 与
+    # snat_ip 的语义天然对齐。verify_snat_rule 比对的也是这个值，两边同源，
+    # 不会出现「读取端各算各的、互相通过」。
+    # 读内核 br-lan 只作为兜底：br-lan 的真实地址要 network reload 之后才更新，
+    # 而 reload 在 build_NETBASE 末尾的 flush_uci 里，晚于本节点 —— 此刻读内核
+    # 拿到的还是旧地址，反而会把即将失效的 IP 固化进规则。
+    _si=$(run uci -q get network.lan.ipaddr 2>/dev/null)
     if [ -z "$_si" ]; then
-        _si=$(run uci -q get network.lan.ipaddr 2>/dev/null)
+        _si=$(run ip -4 addr show br-lan 2>/dev/null | sed -n 's/.*inet \([0-9][0-9.]*\)\/.*/\1/p' | head -n1)
         # 必须走 stderr：本函数靠 stdout 的 echo 返回结果，调用方是 $( _lan_ip )，
-        # 任何打到 stdout 的日志都会混进返回值，让 snat_ip 变成两行字符串。
-        [ -n "$_si" ] && log "[SNAT] br-lan 尚无地址，暂用配置值 $_si" >&2
+        # 打到 stdout 的日志会混进返回值，让 snat_ip 变成两行字符串。
+        [ -n "$_si" ] && log "[SNAT] 配置里没有 lan 地址，改用 br-lan 实际地址 $_si" >&2
     fi
     [ -n "$_si" ] || { [ -f /etc/config/custom_router_ip.txt ] && _si=$(head -n1 /etc/config/custom_router_ip.txt | tr -d ' \t\r\n'); }
     [ -n "$_si" ] || _si='10.0.0.201'
@@ -634,6 +627,14 @@ build_lan_static() {
     run uci -q delete network.lan.dns 2>/dev/null
     run uci -q add_list network.lan.dns="$4"
     log "[LAN] 已写入静态地址 $1/$2 网关 $3 DNS $4"
+    # 【2026-11-11 用户方案】写完当场 commit：让后面的 snat 节点读 network.lan.ipaddr
+    # 时拿到的是落盘后的值，而不是只存在于 /tmp/.uci delta 里的内存态。
+    # 真正的 reload 仍由 build_NETBASE 末尾的 flush_uci 统一做（那里还会重接容器 veth），
+    # 这里只保证「配置已定稿」，不碰网络。
+    if ! run uci -q commit network 2>/dev/null; then
+        log "[LAN] commit network 失败（地址只在内存里，重启即丢）"
+        return 1
+    fi
     return 0
 }
 
@@ -773,32 +774,6 @@ build_fwd_rules() {
 
 # SNAT builder：从容器网段到 LAN 地址的源地址改写（容器出网生命线）
 build_snat() {
-    # 【2026-11-11 用户方案】先把 br-lan 的地址对齐到配置，再写 SNAT。
-    # 时序：lan_static 只 `uci set network.lan.ipaddr`，真正 reload 要等到
-    # build_NETBASE 末尾的 flush_uci —— 也就是说本节点执行时，内核里的 br-lan
-    # 很可能还是旧地址。这时无论读配置还是读内核都会打架：写进 snat_ip 的那一份
-    # 总有一半是错的（旧地址配新规则 / 新地址配旧路由）。
-    # 所以这里主动落盘 + reload 一次，让两边一致；对齐失败就判本节点失败，
-    # 不去猜一个「看起来能用」的地址 —— 路由器 LAN 没有可用地址本身就是硬故障，
-    # 掩盖它只会让后面的 capi register / console enroll 全部超时，且日志指向网络。
-    _sn_cfg=$(run uci -q get network.lan.ipaddr 2>/dev/null)
-    _sn_real=$(run ip -4 addr show br-lan 2>/dev/null | sed -n 's/.*inet \([0-9][0-9.]*\)\/.*/\1/p' | head -n1)
-    if [ -n "$_sn_cfg" ] && [ "$_sn_cfg" != "$_sn_real" ]; then
-        log "[SNAT] br-lan 实际地址（${_sn_real:-无}）≠ 配置（$_sn_cfg），先提交并 reload network"
-        run uci -q commit network 2>/dev/null
-        if run_svc /etc/init.d/network reload >/dev/null 2>&1; then
-            _reattach_ct_veth || true
-            _sn_real=$(run ip -4 addr show br-lan 2>/dev/null | sed -n 's/.*inet \([0-9][0-9.]*\)\/.*/\1/p' | head -n1)
-            log "[SNAT] network 已重载，br-lan 现在是 ${_sn_real:-无}"
-        else
-            log "[SNAT] network 重载失败（配置已落盘，下次重载/重启才生效），本节点判失败"
-            return 1
-        fi
-        if [ "$_sn_cfg" != "$_sn_real" ]; then
-            log "[SNAT] 重载后 br-lan 地址（${_sn_real:-无}）仍≠配置（$_sn_cfg），本节点判失败"
-            return 1
-        fi
-    fi
     _sn=$(_snat_sec)
     if [ -z "$_sn" ]; then
         run uci -q add firewall nat >/dev/null 2>&1 || { log "[SNAT] 无法新建 nat 段"; return 1; }
