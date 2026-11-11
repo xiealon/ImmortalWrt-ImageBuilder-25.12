@@ -12,12 +12,7 @@ SROOT="${CS_SCRIPT_ROOT-/rom}"
 # 注意：本组不是 DAG 节点，没有 check/fix 两态 —— 它只在某个节点的 build 失败
 #       且判定为「资产残缺」时才被调用，属于故障处理链，不是常规步骤。
 
-_overlay_umount() {
-    _overlay_mounted || return 0
-    run umount "$ROOTFS" 2>/dev/null && return 0
-    run umount -l "$ROOTFS" 2>/dev/null && return 0
-    return 1
-}
+# 【2026-11-11】_overlay_umount 已挪到 _lib.sh（install/selfheal/boot 共用）
 
 _cur_boot_id() {
     cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d ' \t\r\n'

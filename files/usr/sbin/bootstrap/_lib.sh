@@ -62,7 +62,7 @@ SROOT="${CS_SCRIPT_ROOT-/rom}"
 #   也摘掉，否则 exit 会二次触发 EXIT、恢复逻辑跑两遍（这个坑踩过一次）。
 #   顺序：先做重装失败计数、再做恢复——反了的话计数会读到已被清空的状态。
 
-SCRIPT_VER="2026.11.10"
+SCRIPT_VER="2026.11.11"
 
 LXC_NAME="${LXC_NAME:-ubuntu}"
 CS_HOME="${CS_HOME:-/etc/crowdsec}"
@@ -129,6 +129,15 @@ CRED_KEEP_FILE="${CS_BOOTSTRAP_CRED_KEEP:-/etc/config/crowdsec_credentials_keep.
 # 「文件在、结构对」不等于「内容还是我写的那份」，被人改过一个字符也算不符。
 # 不比整目录指纹：目录里多一个用户自己加的解析器，不该被判定为不符。
 CFG_SHA_FILE="$STATE_DIR/cfg_sha"
+# 【2026-11-11 修】这 4 个文件的清单与 _cfg_sha_now/_cfg_sha_write 原来都在 main.sh，
+# 但调用方 verify_cfg_sha 在 _lib.sh —— 各 step.sh 只 source _lib.sh/_dag.sh/selfheal，
+# 不 source main.sh → _cfg_sha_now 一律 not found → verify_cfg_sha 恒返回 1 →
+# logconf 组永久失败（真机 2026-11-11 10:21 现场就是这条）。
+# 清单与函数统一挪到 _lib.sh，跨组共用。
+CFG_SHA_LIST="etc/crowdsec/config.yaml
+etc/crowdsec/acquis.d/router.yaml
+etc/crowdsec/parsers/s01-parse/openwrt-dropbear.yaml
+etc/crowdsec/parsers/s02-enrich/openwrt-whitelist.yaml"
 # 【v.108.18】「重启之后才重置，一次」的判据：boot_id 认「本次开机的首跑」。
 # 开机首跑允许重置；探针在运行期重跑 bootstrap 时 boot_id 不变、标记已写好 →
 # 不是首跑 → 只修不重置（运行期抹 rootfs 会中断正在跑的容器，多半也只需修）。
@@ -868,6 +877,49 @@ bouncer_pulling() {
 # 返回 0 = 在，1 = 确实不在，2 = 判不了（cscli 没跑成）。
 # 必须分三态：调用方要区分「bouncer 没了」和「容器不理我」——
 # 前者该重签 api_key，后者重签毫无意义（僵死容器连 cscli 都调不动）。
+# 四个文件逐个算 sha256，输出「sha 相对路径」行；缺任何一个都算算不出来
+#
+# 【v.108.42】config.yaml 不能整文件算进基线。它里面有几行是「设计上每轮必变」的：
+#   capi_block    启动前把 online_client 注释掉
+#   capi_release  bouncer 验证后把它放回来
+# 基线是在 _stamp_write 那一刻写的（那时按设计是「放开态」），而重启态的开机引导
+# 一上来就先跑 capi_block 注释 → 文件变了 → LOGCONF 的 verify_acquis 立刻报
+# 「解析器/配置 sha 与基线不符」→ build_acquis 怎么写都写不回去（它压根不管
+# online_client 那两行）→ hard 退出。
+# 处理：把这四行剔掉再算 sha —— online_client 与它的 online_api credentials_path。
+# （client 段的 local_api credentials_path 不受影响，正则限定了 online_api_credentials.yaml）
+#
+# 【2026-11-11】从 main.sh 挪来：调用方 verify_cfg_sha 在 _lib.sh，
+# 而 step.sh 不 source main.sh，原位置导致跨文件 not found。
+_cfg_sha_now() {
+    for _r in $CFG_SHA_LIST; do
+        [ -f "$ROOTFS/$_r" ] || return 1
+        case "$_r" in
+            etc/crowdsec/config.yaml)
+                _h=$(sed -E \
+                        -e '/^[[:space:]]*#?[[:space:]]*online_client:/d' \
+                        -e '/credentials_path:[[:space:]]*\/etc\/crowdsec\/online_api_credentials\.yaml/d' \
+                        "$ROOTFS/$_r" 2>/dev/null | sha256sum | awk '{print $1}')
+                ;;
+            *)
+                _h=$(sha256sum "$ROOTFS/$_r" 2>/dev/null | awk '{print $1}')
+                ;;
+        esac
+        [ -n "$_h" ] || return 1
+        printf '%s  %s\n' "$_h" "$_r"
+    done
+}
+
+# 一轮跑完（stamp 落盘那一刻）把当时的 sha 记成基线，首行钉住版本号：
+# 换了脚本版本就说明产出可能变，旧基线不该拿来判新脚本。
+_cfg_sha_write() {
+    mkdir -p "$STATE_DIR" 2>/dev/null || return 1
+    _cs_new=$(_cfg_sha_now) || return 1
+    { printf 'ver=%s\n' "$SCRIPT_VER"; printf '%s\n' "$_cs_new"; } >"$CFG_SHA_FILE.tmp" 2>/dev/null || return 1
+    [ -s "$CFG_SHA_FILE.tmp" ] || { rm -f "$CFG_SHA_FILE.tmp" 2>/dev/null; return 1; }
+    mv -f "$CFG_SHA_FILE.tmp" "$CFG_SHA_FILE" 2>/dev/null
+}
+
 verify_cfg_sha() {
     [ -s "$CFG_SHA_FILE" ] || return 0
     [ "$(sed -n '1s/^ver=//p' "$CFG_SHA_FILE" 2>/dev/null)" = "$SCRIPT_VER" ] || return 0
@@ -1049,4 +1101,88 @@ _mount_systemd_cgroup() {
 verify_online_client_off() {
     [ -f "$CROWDSEC_CFG" ] || return 1
     ! grep -qE "^[[:space:]]*online_client:" "$CROWDSEC_CFG" 2>/dev/null
+}
+
+
+# ============================================================================
+# overlay 根（2026-11-11 从 install/step.sh 与 selfheal/step.sh 归并到此处）
+#
+# 为什么必须放在 _lib.sh：这 5 个函数跨组调用 ——
+#   install/step.sh   build_rootfs → build_overlay_root
+#   selfheal/step.sh  _overlay_umount / L3 丢层 / 重装抹盘
+#   boot/step.sh      source selfheal 后走重启路径，间接用到 _overlay_mounted
+# 原先把 _overlay_mounted 放 install、_overlay_umount 放 selfheal，
+# 两个文件互相调用对方的函数，而 step.sh 是**独立进程**执行的（不是同一 shell），
+# 函数定义跨文件不可见。真机 2026-11-11 10:18 的症状：
+#   /rom/usr/sbin/bootstrap/boot/step.sh: line 16: _overlay_mounted: not found
+#   → 重装流程跳过 overlay 重建 → /overlay/lxc-upper 被 rm 后没人 mkdir
+#   → lxc-start: lxc_rootfs_init: 380 Failed to pin rootfs → 容器永久起不来。
+#
+# 【v.108.56】设计：lower = /rom 只读基底，upper/work = /overlay（f2fs）
+# 三个前提，缺一不可（2026-10-22 真机验过）：
+#   ① 内核支持 overlay：/proc/filesystems 含 "nodev overlay"
+#   ② upperdir 所在 fs 支持 xattr：/overlay 是 f2fs（user_xattr,inline_xattr）
+#   ③ upperdir 不能是 overlayfs 本身：/srv 在 rootfs overlay 上，直接用它 rc=32
+_overlay_mounted() {
+    [ -d "$ROOTFS" ] || return 1
+    run mount 2>/dev/null | grep -qF " on $ROOTFS type overlay"
+}
+
+_overlay_umount() {
+    _overlay_mounted || return 0
+    run umount "$ROOTFS" 2>/dev/null && return 0
+    run umount -l "$ROOTFS" 2>/dev/null && return 0
+    return 1
+}
+
+_base_fingerprint() {
+    [ -s "$ROM_BASE.fingerprint" ] || return 1
+    head -n1 "$ROM_BASE.fingerprint" 2>/dev/null | tr -d ' \t\r\n'
+}
+
+# upper 里记着「我这层是照着哪版基底建的」。换固件后基底变了、upper 还是旧的，
+# 旧副本会永久遮住新基底的同名文件 —— 看着升级了，其实没升。所以指纹不符就整层丢弃。
+_upper_stamp_ok() {
+    _usf="$(_base_fingerprint)" || return 0
+    [ -f "$OVL_UPPER/.base-fingerprint" ] || return 1
+    [ "$(head -n1 "$OVL_UPPER/.base-fingerprint" 2>/dev/null | tr -d ' \t\r\n')" = "$_usf" ]
+}
+
+build_overlay_root() {
+    [ -d "$ROM_BASE" ] || {
+        log "[overlay] 固件里没有只读基底（$ROM_BASE），改用镜像解压"
+        return 1
+    }
+    # 【2026-11-11 修·僵尸挂载】mount 表里还挂着 rootfs，但 upperdir 目录已经没了。
+    # 成因：重装抹盘 `rm -rf $OVL_UPPER` 之后进程中断（或 _overlay_umount 失败），
+    # 内核仍持有已删除的 upper inode —— mount 看着正常，上层目录实际不存在，
+    # lxc 启动时 pin rootfs 直接失败：
+    #   lxc_rootfs_init: 380 No such file or directory - Failed to pin rootfs
+    # 此时「已挂载就 return 0」是错的（旧写法就是这样，导致永远修不回来），
+    # 必须先卸掉再按正常流程重建 upper/work。
+    if _overlay_mounted && [ ! -d "$OVL_UPPER" ]; then
+        log "[overlay] 僵尸挂载：$ROOTFS 挂着但 upperdir $OVL_UPPER 已不存在，先卸载再重建"
+        _overlay_umount || log "[overlay] 卸载失败，继续按重建流程尝试"
+    fi
+    mkdir -p "$OVL_UPPER" "$OVL_WORK" "$ROOTFS" 2>/dev/null || {
+        log "[overlay] 建目录失败（$OVL_UPPER / $OVL_WORK / $ROOTFS）"
+        return 1
+    }
+    if _overlay_mounted; then
+        log "[overlay] 已挂载：$ROOTFS"
+        return 0
+    fi
+    if ! _upper_stamp_ok; then
+        log "[overlay] upper 与基底指纹不符（换过固件或首次），丢弃可写层重建"
+        rm -rf "$OVL_UPPER" "$OVL_WORK" 2>/dev/null
+        mkdir -p "$OVL_UPPER" "$OVL_WORK" 2>/dev/null || return 1
+    fi
+    if ! run mount -t overlay overlay \
+            -o "lowerdir=$ROM_BASE,upperdir=$OVL_UPPER,workdir=$OVL_WORK" "$ROOTFS"; then
+        log "[overlay] 挂载失败：lower=$ROM_BASE upper=$OVL_UPPER work=$OVL_WORK"
+        return 1
+    fi
+    _base_fingerprint > "$OVL_UPPER/.base-fingerprint" 2>/dev/null
+    log "[overlay] 只读基底已挂载：lower=$ROM_BASE upper=$OVL_UPPER"
+    return 0
 }

@@ -368,7 +368,7 @@ _check_group() {
     done
     [ -z "$_cg_bad" ] && return 0
     for _cg_n in $_cg_bad; do
-        printf '%%s\n' "$_cg_n" >&2
+        printf '%s\n' "$_cg_n" >&2
     done
     return 1
 }
@@ -379,10 +379,10 @@ _fix_group() {
     for _fg_x in $MY_NODES; do
         "verify_$_fg_x" >/dev/null 2>&1 && continue
         _fg_n=$((_fg_n + 1))
-        log "[%%s] 修复 %%s" "$MY_GROUP" "$_fg_x"
-        ensure "$_fg_x" || log "[%%s] 修复 %%s 未成功（留待复检）" "$MY_GROUP" "$_fg_x"
+        log "[%s] 修复 %s" "$MY_GROUP" "$_fg_x"
+        ensure "$_fg_x" || log "[%s] 修复 %s 未成功（留待复检）" "$MY_GROUP" "$_fg_x"
     done
-    [ "$_fg_n" -gt 0 ] || log "[%%s] 无需修复（本组节点全部达标）" "$MY_GROUP"
+    [ "$_fg_n" -gt 0 ] || log "[%s] 无需修复（本组节点全部达标）" "$MY_GROUP"
     _check_group
 }
 

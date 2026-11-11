@@ -202,59 +202,7 @@ _pick_tarball() {
     return 1
 }
 
-# 【v.108.56】overlay 根：lower = /rom 只读基底，upper/work = /overlay（f2fs）
-# 真正的收益不是「省一次解压」，而是「固定文件在物理上改不了」：
-# /etc/init.d/rcS、/etc/inittab、crowdsec-supervise 这些留在 lower 里，
-# 容器内想改也改不动，guard 从「每 60 秒盖回去」退化成冗余保险。
-# 三个前提，缺一不可（2026-10-22 真机验过）：
-#   ① 内核支持 overlay：/proc/filesystems 含 "nodev overlay"
-#   ② upperdir 所在 fs 支持 xattr：/overlay 是 f2fs（user_xattr,inline_xattr）
-#   ③ upperdir 不能是 overlayfs 本身：/srv 在 rootfs overlay 上，直接用它 rc=32
-_overlay_mounted() {
-    [ -d "$ROOTFS" ] || return 1
-    run mount 2>/dev/null | grep -qF " on $ROOTFS type overlay"
-}
-
-_base_fingerprint() {
-    [ -s "$ROM_BASE.fingerprint" ] || return 1
-    head -n1 "$ROM_BASE.fingerprint" 2>/dev/null | tr -d ' \t\r\n'
-}
-
-# upper 里记着「我这层是照着哪版基底建的」。换固件后基底变了、upper 还是旧的，
-# 旧副本会永久遮住新基底的同名文件 —— 看着升级了，其实没升。所以指纹不符就整层丢弃。
-_upper_stamp_ok() {
-    _usf="$(_base_fingerprint)" || return 0
-    [ -f "$OVL_UPPER/.base-fingerprint" ] || return 1
-    [ "$(head -n1 "$OVL_UPPER/.base-fingerprint" 2>/dev/null | tr -d ' \t\r\n')" = "$_usf" ]
-}
-
-build_overlay_root() {
-    [ -d "$ROM_BASE" ] || {
-        log "[overlay] 固件里没有只读基底（$ROM_BASE），改用镜像解压"
-        return 1
-    }
-    mkdir -p "$OVL_UPPER" "$OVL_WORK" "$ROOTFS" 2>/dev/null || {
-        log "[overlay] 建目录失败（$OVL_UPPER / $OVL_WORK / $ROOTFS）"
-        return 1
-    }
-    if _overlay_mounted; then
-        log "[overlay] 已挂载：$ROOTFS"
-        return 0
-    fi
-    if ! _upper_stamp_ok; then
-        log "[overlay] upper 与基底指纹不符（换过固件或首次），丢弃可写层重建"
-        rm -rf "$OVL_UPPER" "$OVL_WORK" 2>/dev/null
-        mkdir -p "$OVL_UPPER" "$OVL_WORK" 2>/dev/null || return 1
-    fi
-    if ! run mount -t overlay overlay \
-            -o "lowerdir=$ROM_BASE,upperdir=$OVL_UPPER,workdir=$OVL_WORK" "$ROOTFS"; then
-        log "[overlay] 挂载失败：lower=$ROM_BASE upper=$OVL_UPPER work=$OVL_WORK"
-        return 1
-    fi
-    _base_fingerprint > "$OVL_UPPER/.base-fingerprint" 2>/dev/null
-    log "[overlay] 只读基底已挂载：lower=$ROM_BASE upper=$OVL_UPPER"
-    return 0
-}
+# 【2026-11-11】overlay 五函数已挪到 _lib.sh（跨组共用，见该文件末尾说明）
 
 rebuild_from_image() {
     log "尝试从镜像解压 rootfs：$TARBALL"
@@ -297,7 +245,7 @@ _check_group() {
     done
     [ -z "$_cg_bad" ] && return 0
     for _cg_n in $_cg_bad; do
-        printf '%%s\n' "$_cg_n" >&2
+        printf '%s\n' "$_cg_n" >&2
     done
     return 1
 }
@@ -308,10 +256,10 @@ _fix_group() {
     for _fg_x in $MY_NODES; do
         "verify_$_fg_x" >/dev/null 2>&1 && continue
         _fg_n=$((_fg_n + 1))
-        log "[%%s] 修复 %%s" "$MY_GROUP" "$_fg_x"
-        ensure "$_fg_x" || log "[%%s] 修复 %%s 未成功（留待复检）" "$MY_GROUP" "$_fg_x"
+        log "[%s] 修复 %s" "$MY_GROUP" "$_fg_x"
+        ensure "$_fg_x" || log "[%s] 修复 %s 未成功（留待复检）" "$MY_GROUP" "$_fg_x"
     done
-    [ "$_fg_n" -gt 0 ] || log "[%%s] 无需修复（本组节点全部达标）" "$MY_GROUP"
+    [ "$_fg_n" -gt 0 ] || log "[%s] 无需修复（本组节点全部达标）" "$MY_GROUP"
     _check_group
 }
 

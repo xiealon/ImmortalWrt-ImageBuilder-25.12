@@ -354,64 +354,10 @@ _bs_content_fp() {
 }
 
 # ---- 静态配置 sha 基线（v.108.25）----
-# 「文件在」「结构对」都只是形式；内容和上次写的那份是不是同一份，只有 sha 说得清。
-# 覆盖范围刻意收窄到脚本自己写的那四份文件，不多算一个字节：
-#   主配置 config.yaml / 采集源 acquis.d/router.yaml / 两个解析器
-# 不比整目录指纹 —— 用户自己在 parsers/ 下加解析器是合理需求，不该判成不符。
-CFG_SHA_LIST="etc/crowdsec/config.yaml
-etc/crowdsec/acquis.d/router.yaml
-etc/crowdsec/parsers/s01-parse/openwrt-dropbear.yaml
-etc/crowdsec/parsers/s02-enrich/openwrt-whitelist.yaml"
+# 【2026-11-11】CFG_SHA_LIST / _cfg_sha_now / _cfg_sha_write 已整体挪到 _lib.sh：
+# 调用方 verify_cfg_sha 在 _lib.sh，而 step.sh 不 source main.sh，
+# 原位置跨文件 not found，logconf 组会永久失败。此处只留注释指向新位置。
 
-# 四个文件逐个算 sha256，输出「sha 相对路径」行；缺任何一个都算算不出来
-#
-# 【v.108.42】config.yaml 不能整文件算进基线。它里面有几行是「设计上每轮必变」的：
-#   capi_block    启动前把 online_client 注释掉
-#   capi_release  bouncer 验证后把它放回来
-# 基线是在 _stamp_write 那一刻写的（那时按设计是「放开态」），而重启态的开机引导
-# 一上来就先跑 capi_block 注释 → 文件变了 → LOGCONF 的 verify_acquis 立刻报
-# 「解析器/配置 sha 与基线不符」→ build_acquis 怎么写都写不回去（它压根不管
-# online_client 那两行）→ hard 退出。
-# 首台真机实测（07:15 那一轮，重启后第一次引导）：
-#   [日志] 解析器/配置 sha 与基线不符（内容被改动）
-#   [日志] 容器内采集配置不符
-#   [配置] 解析器 + 日志源 + 白名单已写入
-#   [日志] 容器内采集配置写入后仍不符
-#   [logconf] 构建执行失败，hard 失败，引导终止（退出码 1）
-# 这不是配置被改坏，是判据把「设计内的状态切换」当成了漂移。
-# 处理：把这四行剔掉再算 sha —— online_client 与它的 online_api credentials_path。
-# （client 段的 local_api credentials_path 不受影响，正则限定了 online_api_credentials.yaml）
-_cfg_sha_now() {
-    for _r in $CFG_SHA_LIST; do
-        [ -f "$ROOTFS/$_r" ] || return 1
-        case "$_r" in
-            etc/crowdsec/config.yaml)
-                _h=$(sed -E \
-                        -e '/^[[:space:]]*#?[[:space:]]*online_client:/d' \
-                        -e '/credentials_path:[[:space:]]*\/etc\/crowdsec\/online_api_credentials\.yaml/d' \
-                        "$ROOTFS/$_r" 2>/dev/null | sha256sum | awk '{print $1}')
-                ;;
-            *)
-                _h=$(sha256sum "$ROOTFS/$_r" 2>/dev/null | awk '{print $1}')
-                ;;
-        esac
-        [ -n "$_h" ] || return 1
-        printf '%s  %s\n' "$_h" "$_r"
-    done
-}
-
-# 一轮跑完（stamp 落盘那一刻）把当时的 sha 记成基线，首行钉住版本号：
-# 换了脚本版本就说明产出可能变，旧基线不该拿来判新脚本。
-_cfg_sha_write() {
-    mkdir -p "$STATE_DIR" 2>/dev/null || return 1
-    _cs_new=$(_cfg_sha_now) || return 1
-    { printf 'ver=%s\n' "$SCRIPT_VER"; printf '%s\n' "$_cs_new"; } >"$CFG_SHA_FILE.tmp" 2>/dev/null || return 1
-    [ -s "$CFG_SHA_FILE.tmp" ] || { rm -f "$CFG_SHA_FILE.tmp" 2>/dev/null; return 1; }
-    mv -f "$CFG_SHA_FILE.tmp" "$CFG_SHA_FILE" 2>/dev/null
-}
-
-# 判据：当前 sha 与基线逐字节一致。
-# 无基线（首次安装还没跑完）或版本已变（基线过期）→ 不拿它下结论，交给结构判据。
 _stamp_field() {
     [ -s "$STAMP_FILE" ] || return 0
     sed -n "s/^$1=//p" "$STAMP_FILE" 2>/dev/null | head -n 1
