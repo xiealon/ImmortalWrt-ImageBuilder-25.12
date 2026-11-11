@@ -47,6 +47,18 @@ case "${1:-}" in
 --verify-only|--only-funcs|--net-only)
     exec sh "$_here/main.sh" "$@"
     ;;
+# 【2026-11-11 修】探针在调这两个参数，但这里从来没转发过 ——
+# main.sh 里 965 行 / 977 行早就实现了 --probe-check 与 --bouncer-heal，
+# 只是 bootstrap.sh 的 case 没列出来，落到最后的 *) 分支：
+#   用法：/rom/usr/sbin/bootstrap/bootstrap.sh [--check-all|--fix-all|--full|--verify-only]
+#   Command exited with non-zero status 2
+# 结果探针每轮都报「【bouncer 下发】检查异常退出 2（124=超时）」
+# 和「【停滞】last_pull 判不了」，把「参数没转发」误报成「超时」。
+# 真机 2026-11-11 13:08 现场：手工 lxc-attach 0.13s、cscli 0.38s，
+# 根本不存在超时；手工直接跑 bootstrap.sh --bouncer-heal 才是 exit 2。
+--probe-check|--bouncer-heal)
+    exec sh "$_here/main.sh" "$@"
+    ;;
 -h|--help)
     sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
@@ -79,7 +91,7 @@ case "${1:-}" in
     exit $_rc
     ;;
 *)
-    echo "用法：$0 [--check-all|--fix-all|--full|--verify-only]" >&2
+    echo "用法：$0 [--check-all|--fix-all|--full|--verify-only|--probe-check|--bouncer-heal]" >&2
     exit 2
     ;;
 esac
