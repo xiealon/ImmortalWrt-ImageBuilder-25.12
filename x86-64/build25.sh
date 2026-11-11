@@ -302,6 +302,15 @@ if echo "$PACKAGES" | grep -q "daed"; then
     fi
     echo "    BTF 版本 $_DAED_BTF_VER（目标内核 ${_dd_kver:-未知，跳过校验}）"
     echo "    ↓ $(basename "$_dd_btf_url")"
+    # 【2026-11-11】下载前先清掉 packages/ 里所有旧 btf包。
+    # ImageBuilder 镜像自带一份 vmlinux-btf-6.12.103-r1-x86_64.apk（正好就是目标内核
+    # 版本，所以 _ak_skip_btf 排除不掉它）；下面 cp 进来的 6.12.87 与
+    # _gh_fixname 改名后的 6.12.103-r1 也在同一目录。三份同名同版本的包同时存在，
+    # apk mkndx 会全编进索引，但一个名字+版本只能对一条 datahash，其余在
+    # make image 阶段报：ERROR: vmlinux-btf-6.12.103-r1: ADB integrity error
+    # （真机 2026-11-11 run #22 就是这么挂的）。
+    # 先清干净，只留下面下载的那一份（版本已和目标内核校过）。
+    rm -f /home/build/immortalwrt/packages/vmlinux-btf-*.apk 2>/dev/null || true
     wget -q "$_dd_btf_url" -P /home/build/immortalwrt/packages/ \
         || { echo "::error::daed: 下载失败 $_dd_btf_url"; exit 1; }
     _dd_n=$((_dd_n + 1))
