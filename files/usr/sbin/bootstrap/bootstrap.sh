@@ -52,6 +52,19 @@ case "${1:-}" in
     exit 0
     ;;
 "")
+    # 【2026-11-11】enroll 必须单独补跑一次，不能靠 check.sh 把它带进来。
+    # enroll 组的 --check 恒返回 0（它的完成要人去 app.crowdsec.net 点 Accept，
+    # 本地无法判定，不能因为「网页还没点」就把开机判成失败）。
+    # 但恒 0 的副作用是：check.sh 永远看不到它失败 → fix.sh 永远不修它
+    # → build_enroll 不跑 → 刷机/重装后 capi register 与 console enroll 一次都不做。
+    # 真机 2026-11-11 12:10 现场：九组全绿、installed 已写，但
+    #   online_api_credentials.yaml 0 B、cscli capi status 报 not registered、
+    #   console status 显示 not enrolled —— 用户只能手工敲两条 cscli 才能用。
+    # enroll --fix 本身是幂等的：内部先 verify_enroll，已注册就直接返回
+    # （顺手把主注册码挪进保险柜）；未注册且本次开机没提交过 → 才提交一次。
+    if [ -f "$_here/enroll/step.sh" ]; then
+        sh "$_here/enroll/step.sh" --fix >/dev/null 2>&1 || true
+    fi
     # 默认：检测 → 只修失败的 → 复检
     echo "[step] 检测全部步骤"
     if sh "$_here/check.sh" -v; then
