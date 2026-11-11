@@ -196,7 +196,23 @@ _fix_group() {
 # 被 source 时不执行入口（main.sh / bootstrap.sh 需要本文件的函数）
 if [ "${0##*/}" = "step.sh" ]; then
 case "${1:---check}" in
---check)      log "[ENROLL] 跳过检测（需网页 Accept，不作为本地判定依据）"; exit 0 ;;
+--check)
+    # 【2026-11-11】原来只打一句「跳过检测」就 exit 0，信息量为零 ——
+    # 九组全绿时完全看不出 CAPI 凭据是空的、注册码也从没提交过。
+    # 这里保持 rc 恒 0（完成要人去 app.crowdsec.net 点 Accept，本地判不了，
+    # 不能因为网页没点就把开机判成失败），但把真实状态报出来。
+    # 注：console_enroll_ok 会进容器跑 cscli console status（timeout 8），
+    # 容器没跑时它返回 1，会落到「未注册」分支，这与事实一致。
+    _enroll_key_load
+    if console_enroll_ok; then
+        log "[ENROLL] 已注册（console 已接受）"
+    elif [ -n "$_ENROLL_KEY_V" ]; then
+        log "[ENROLL] 未注册，有注册码；--fix 会提交一次（本次开机仅一次）"
+    else
+        log "[ENROLL] 未注册且无注册码（$ENROLL_KEY_FILE / $ENROLL_KEY_KEEP 都不在）"
+    fi
+    exit 0
+    ;;
 --fix)        _fix_group   && exit 0 || exit 1 ;;
 --node)
     _nd="${2:-}"
