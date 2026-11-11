@@ -313,6 +313,13 @@ if echo "$PACKAGES" | grep -q "daed"; then
     rm -f /home/build/immortalwrt/packages/vmlinux-btf-*.apk 2>/dev/null || true
     wget -q "$_dd_btf_url" -P /home/build/immortalwrt/packages/ \
         || { echo "::error::daed: 下载失败 $_dd_btf_url"; exit 1; }
+    # 【2026-11-11】下载后必须改名：apk 3.x 取包时按
+    # <name>-<version>.apk 拼路径，不读索引里的 filename。
+    # 下载回来的叫 vmlinux-btf-6.12.103-r1-x86_64.apk，客户端拼的是
+    # vmlinux-btf-6.12.103-r1.apk —— 不改名就报
+    #   ERROR: vmlinux-btf-6.12.103-r1: package mentioned in index not found
+    # （run #23 就是这么挂的）。
+    _gh_fixname "/home/build/immortalwrt/packages/$(basename "$_dd_btf_url")" || exit 1
     _dd_n=$((_dd_n + 1))
 
     for _dd_pkg in daed luci-app-daede; do
