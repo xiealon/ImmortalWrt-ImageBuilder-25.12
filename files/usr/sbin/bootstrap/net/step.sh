@@ -1009,6 +1009,16 @@ _fix_group() {
         ensure "$_fg_x" || log "[$MY_GROUP] 修复 $_fg_x 未成功（留待复检）"
     done
     [ "$_fg_n" -gt 0 ] || log "[$MY_GROUP] 无需修复（本组节点全部达标）"
+    # 【2026-11-11】fix.sh 路径必须在这里 commit + reload 一次。
+    # build_* 大多只写 uci 内存态（uci set 落在 /tmp/.uci/ 的 delta 里），
+    # commit/reload 原本只在 build_<组> 末尾的 flush_uci 里做 —— 而那条路径只有
+    # main.sh --full 会走；fix.sh 逐组调 `sh <组>/step.sh --fix`，走的是本函数，
+    # 修完不 commit 就等于「只在内存里修好了」：/etc/config 没动、fw4 的 nft 表没重建，
+    # 重启即清空，下次开机 verify 又不过、又 build 一遍，永远修不进去。
+    # 真机 2026-11-11 14:37 场景：snat 的 uci set 后 /tmp/.uci/firewall 有 delta，
+    # 直到 14:39 才有别的路径把它 commit 掉，中间 LuCI 读到的还是旧值。
+    # flush_uci 内部按 _dirty_<节点> 判断，没改动的组不会白 reload。
+    flush_uci || log "[$MY_GROUP] flush_uci 未全部成功（改动可能只在内存里）"
     _check_group
 }
 
