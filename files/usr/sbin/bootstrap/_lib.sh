@@ -1200,3 +1200,117 @@ build_overlay_root() {
     log "[overlay] 只读基底已挂载：lower=$ROM_BASE upper=$OVL_UPPER"
     return 0
 }
+
+# ---- 包缓存（2026-11-11 从 net/step.sh 与 main.sh 归并）----
+# 原先 _PKG_IDX/_PKG_EXT/PKG_CACHE/PKG_CACHE_RO 定义在 net/step.sh:407-423，
+# 而使用它们的 _pkgcache_* 在 main.sh —— main.sh 会 source 全部 step.sh 所以能跑，
+# 但 bouncer/step.sh 不 source main.sh，调 _rom_restore_pkg 就 not found。
+# 现在统一放 _lib.sh，所有组都能解析到。用 :- 写法，net/step.sh 里同名赋值不冲突。
+if [ -z "${_PKG_IDX:-}" ]; then
+    _PKG_DEF_OV=/root/apk-cache
+    _PKG_DEF_RO=/rom/root/apk-cache
+    _PKG_IDX=packages.adb
+    _PKG_EXT=apk
+    PKG_CACHE="${PKG_CACHE:-$_PKG_DEF_OV}"
+    PKG_CACHE_RO="${PKG_CACHE_RO:-$_PKG_DEF_RO}"
+    _PKG_CACHE_ACT=""
+fi
+
+_pkgcache_resolve() {
+    for _pr_d in "$PKG_CACHE_RO" "$PKG_CACHE"; do
+        [ -n "$_pr_d" ] || continue
+        [ -f "$_pr_d/$_PKG_IDX" ] || continue
+        _PKG_CACHE_ACT="$_pr_d"
+        return 0
+    done
+    _PKG_CACHE_ACT=""
+    return 1
+}
+
+_pkgcache_ready() {
+    _pkgcache_resolve || return 1
+    ls "$_PKG_CACHE_ACT"/*."$_PKG_EXT" >/dev/null 2>&1 || return 1
+    return 0
+}
+
+# 把 pkg-cache 挂成 apk 源。幂等 + 自清理死源。
+# 旧写法只做「没有就追加」，于是两个坑：
+#   ① 路径变了（/root → /rom）就多一条，两条同名源指两个目录；
+#   ② 目录被删后那行还在，`apk update` 遇到不存在的 file:// 源会报错，
+#      连带把真正可用的远程源也更新不掉 —— 用户装任何包都先撞这个错。
+# 现在每次都按前缀重写这一行：其余源一个字不碰，pkgcache 行永远只有一条、且指向
+# 当前真正可用的目录。
+_pkgcache_install_apk() {
+    _pci_pkg="$1"
+    _pkgcache_ready || return 1
+    # 【2026-10-31.0256】apk 必在，写死不探测。
+    # 已装就跳过：没坏的东西不该重装一遍
+    # 【v.180.161】PCR_FORCE=1 时不跳：同上，记账在、文件缺。
+    if [ "${PCR_FORCE:-0}" != "1" ] && apk info -e "$_pci_pkg" >/dev/null 2>&1; then
+        return 0
+    fi
+    # 【v.180.184】apk add 对已装包是 no-op —— 「记账有、文件被删」只有 apk fix
+    # 会按校验和重装（实测删掉 /usr/bin/dns2socks 后 fix 打出 Reinstalling 并补回）。
+    _pci_repos="${TMPDIR:-/tmp}/bootstrap-pkg.repos"
+    printf 'file://%s/%s\n' "$_PKG_CACHE_ACT" "$_PKG_IDX" > "$_pci_repos" 2>/dev/null || {
+        log "[PKG] 写不出临时源文件：$_pci_repos"
+        return 1
+    }
+    if [ "${PCR_FORCE:-0}" = "1" ] && apk info -e "$_pci_pkg" >/dev/null 2>&1; then
+        if apk fix --allow-untrusted --repositories-file "$_pci_repos" "$_pci_pkg" >/dev/null 2>&1; then
+            log "[PKG] 本地 apk 强制重装成功：$_pci_pkg"
+            rm -f "$_pci_repos"
+            return 0
+        fi
+        log "[PKG] 本地 apk 强制重装失败：$_pci_pkg（本地库没有它）"
+        rm -f "$_pci_repos"
+        return 1
+    fi
+    if apk add --allow-untrusted --repositories-file "$_pci_repos" "$_pci_pkg" >/dev/null 2>&1; then
+        log "[PKG] 本地 apk 源装回成功：$_pci_pkg（/etc/apk/world 记账正确，LuCI 可见）"
+        rm -f "$_pci_repos"
+        return 0
+    fi
+    rm -f "$_pci_repos"
+    log "[PKG] 本地 apk 装不回 $_pci_pkg（本地库缺它或缺依赖），放弃 —— 不再拷文件兜底"
+    return 1
+}
+
+_pkgcache_install() {
+    # 【v.180.133】优先交给独立脚本 pkg-cache-restore.sh：它自己会先按
+    # resolve -> 挂源 -> 铺索引 的顺序把前置做好，再装 —— 顺序不再依赖调用方。
+    # 下面这段内置实现保留为兜底：老固件里没有那个脚本，行为必须完全不变。
+    if [ -x "$SROOT/usr/sbin/pkg-cache-restore.sh" ]; then
+        if "$SROOT/usr/sbin/pkg-cache-restore.sh" "$1" >/dev/null 2>&1; then
+            log "[PKG] 经 pkg-cache-restore.sh 装回：$1"
+            return 0
+        fi
+        log "[PKG] pkg-cache-restore.sh 未成功：$1，回退内置实现"
+    fi
+    # 【v.180.198】原来的 `if [ "$_PKG_MGR" = "apk" ]` 之后跟着整套 opkg 装回逻辑
+    # （list-installed 判据 → ipk 直装 → 本地源 + --no-check-signature）。
+    # 25.12 上那段永远不可达，已整段删除；opkg 那套活在自己的 24.10 仓库里。
+    _pkgcache_install_apk "$1"
+    return $?
+}
+
+# 恢复单个包：只走本地包安装，不拷文件（v.180.149）
+_rom_restore_pkg() {
+    # 【v.180.149】改成只走包级。理由：
+    #   ① 拷文件修不了 opkg/apk 记账 —— 装回来的包 LuCI 看不见、依赖解不开、
+    #      下次升级会乱，属于「能跑但半残」；
+    #   ② 文件清单随包版本漂，判据越写越复杂，迟早出错。
+    # 老固件没有本地包库时也无法恢复 —— 装不上就报错，不再补一个半残状态。
+    #
+    # 【v.180.161】第二个参数为 1 = 强制重装（跳过「已装就跳过」判定）。
+    # 只有「文件确已不在」的调用方才许传 1：opkg 记账清不掉手删的文件，
+    # 而 pkg-cache-restore.sh 和下面的内置回退都以记账为准 —— 不强制的话，
+    # 恢复链会在这里返回 0 却不做任何事，日志上看是「装好了」，实际二进制还缺。
+    # PCR_FORCE 是 pkg-cache-lib.sh 的既定接口（那边 _pcr_install 已支持），
+    # 这里只是把它透传下去；前缀赋值由子进程按环境变量继承。
+    if [ "${2:-0}" = "1" ]; then
+        PCR_FORCE=1 _pkgcache_install "$1"
+    else
+        _pkgcache_install "$1"
+    fi
+}
