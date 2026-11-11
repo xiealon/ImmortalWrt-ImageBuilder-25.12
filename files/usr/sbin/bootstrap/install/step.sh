@@ -256,15 +256,15 @@ _fix_group() {
     for _fg_x in $MY_NODES; do
         "verify_$_fg_x" >/dev/null 2>&1 && continue
         _fg_n=$((_fg_n + 1))
-        log "[%s] 修复 %s" "$MY_GROUP" "$_fg_x"
-        ensure "$_fg_x" || log "[%s] 修复 %s 未成功（留待复检）" "$MY_GROUP" "$_fg_x"
+        log "[$MY_GROUP] 修复 $_fg_x"
+        ensure "$_fg_x" || log "[$MY_GROUP] 修复 $_fg_x 未成功（留待复检）"
     done
-    [ "$_fg_n" -gt 0 ] || log "[%s] 无需修复（本组节点全部达标）" "$MY_GROUP"
+    [ "$_fg_n" -gt 0 ] || log "[$MY_GROUP] 无需修复（本组节点全部达标）"
     _check_group
 }
 
 # 被 source 时不执行入口（main.sh / bootstrap.sh 需要本文件的函数）
-if [ "${0##*/}" = "step.sh" ]; then
+if [ "${0##*/}" = "step.sh" ] && [ "${_BS_SOURCED:-0}" != "1" ]; then
 case "${1:---check}" in
 --check)      _check_group && exit 0 || exit 1 ;;
 --fix)        _fix_group   && exit 0 || exit 1 ;;
