@@ -30,6 +30,10 @@ esac
 # 不 source 的话，重装判定走了、动作却是 "full_reinstall: not found"，
 # 现场什么都没抹、日志只说一句 hard 终止，等于重装机制整条消失。
 . "$_BS_HOME/selfheal/step.sh"
+# 【2026-11-11 修】bouncer 组直接调用 lapi 组的 _bouncer_uci_apply（L108），
+# 原来没 source lapi/step.sh，跨文件 not found → 配置损坏时无法从零重建。
+# 位置放在 MY_GROUP= 之前，lapi 的组变量会被下面覆盖。
+. "$_BS_HOME/lapi/step.sh"
 
 MY_GROUP="BOUNCERVERIFY"
 MY_NODES="bouncer_verify capi_release"

@@ -30,6 +30,12 @@ esac
 # 不 source 的话，重装判定走了、动作却是 "full_reinstall: not found"，
 # 现场什么都没抹、日志只说一句 hard 终止，等于重装机制整条消失。
 . "$_BS_HOME/selfheal/step.sh"
+# 【2026-11-11 修】boot 组直接调用 install 组的 verify_ct_config / verify_rootfs /
+# write_cfg（L127 / L131 / L191），但原来只 source 了 _lib/_dag/selfheal，
+# 跨文件一律 not found → 走「容器 config 不完整」这条分支时直接判失败。
+# 所有 step.sh 都有 `if [ "${0##*/}" = "step.sh" ]` 入口守卫，source 只定义函数不执行；
+# 位置放在 MY_GROUP= 赋值之前，install 的 MY_GROUP/MY_NODES 会被下面的赋值覆盖，不会串组。
+. "$_BS_HOME/install/step.sh"
 
 MY_GROUP="BOOT"
 MY_NODES="ct_boot"

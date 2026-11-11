@@ -972,7 +972,21 @@ re_enroll() {
         return 1
     fi
 
-    verify_snat || { log "[enroll] SNAT 缺失/不符，重建"; rebuild snat; }
+    # 【2026-11-11 修】SNAT 是 NETBASE 组的职责，enroll 不能硬依赖它。
+    # verify_snat / build_snat 都定义在 net/step.sh，而 re_enroll 在 _lib.sh ——
+    # enroll/step.sh 只 source _lib.sh/_dag.sh/selfheal，从不 source net/step.sh，
+    # 跨文件调用一律 not found。真机 2026-11-11 11:31 现场：
+    #   [enroll] SNAT 缺失/不符，重建
+    #   [snat] 构建执行失败
+    #   [snat] 构建执行失败，hard 失败，引导终止      ← enroll 根本没走到提交
+    # 而同一时刻手工 `net/step.sh --check-node snat` 是 RC=0、规则也在。
+    # 改成软检查：函数存在才查，查不过只告警，不阻断注册码提交。
+    if command -v verify_snat >/dev/null 2>&1; then
+        verify_snat || {
+            log "[enroll] SNAT 缺失/不符，尝试重建（失败不阻断 enroll）"
+            rebuild snat 2>/dev/null || log "[enroll] SNAT 重建未成功，继续 enroll"
+        }
+    fi
 
     if ! _wait_capi_net 30; then
         log "[enroll] 30 秒内仍无法解析 api.crowdsec.net（容器 DNS 未就绪），放弃本次 enroll"
