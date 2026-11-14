@@ -86,7 +86,10 @@ PROBE_FAIL_ALERT="${CS_PROBE_FAIL_ALERT:-3}"
 # AUDIT_EVERY 轮做一次从头到脚的体检。0 = 关闭。
 # 〔2026-11-09 用户定〕30 轮 x 600s = 5 小时，太长。改成 3 轮 = 30 分钟，
 # 与改动前（30 轮 x 60s）等价。--verify-only 只读不写，单次 20~40 秒。
-PROBE_AUDIT_EVERY="${CS_PROBE_AUDIT_EVERY:-3}"
+PROBE_AUDIT_EVERY="${CS_PROBE_AUDIT_EVERY:-1}"
+# 【2026-11-14 改】默认从 3 改成 1：网络配置（RA/DHCPv4）每轮都验，
+# 发现不符时按 PROBE_AUDIT_GAP=60s 重试两次，三次都坏就 _run_fix。
+# 代价：每轮多一次 --verify-only（28 节点，20~40s），占 10 分钟周期的 3~6%。
 # 【2026-11-09 用户定】体检不符后，隔这么多秒再判第二次、第三次；
 # 三次都不符才动手。60s 是用户给的下限，配两次复验约 3 分钟出结论。
 PROBE_AUDIT_GAP="${CS_PROBE_AUDIT_GAP:-60}"
