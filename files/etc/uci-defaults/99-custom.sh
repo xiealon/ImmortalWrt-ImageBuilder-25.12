@@ -11,25 +11,6 @@ echo "Starting 99-custom.sh at $(date)" >>$LOGFILE
   uci set luci.main.tablefilters='1'
   uci commit
 
-# ===== IPv6 RA 配置（2026-11-14 定档）=====
-# 目的：软路由的 RA 压过光猫的 RDNSS，让设备 IPv6 DNS 指向 smartdns（10.0.0.201）
-# 关键三点：
-#   1) ra_preference=high  → Windows 收到 metric 16，光猫 medium 是 256
-#   2) ra_mininterval/maxinterval=30/60 → 比光猫（200-600s）发得勤，Windows 只保留最后到的 RDNSS
-#   3) ra_management=0 + ra_flags=none → 显式写死 M=0 O=0
-#      （odhcpd 默认 other-config 会让 O=1，设备会发无用的 DHCPv6 Information-request）
-uci -q delete dhcp.lan.ignore
-uci set dhcp.lan.dhcpv4='disabled'
-uci set dhcp.lan.ra='server'
-uci set dhcp.lan.ra_preference='high'
-uci set dhcp.lan.dns_service='1'
-uci set dhcp.lan.ra_mininterval='30'
-uci set dhcp.lan.ra_maxinterval='60'
-uci set dhcp.lan.ra_management='0'
-uci set dhcp.lan.ra_flags='none'
-uci commit dhcp
-echo "IPv6 RA 已写死: dhcpv4=disabled ra=server pref=high dns_service=1 interval=30-60s flags=none" >>$LOGFILE
-
 FILE_PATH="/etc/openwrt_release"
 NEW_DESCRIPTION="Packaged by DeepSeek"
 sed -i "s/DISTRIB_DESCRIPTION='[^']*'/DISTRIB_DESCRIPTION='$NEW_DESCRIPTION'/" "$FILE_PATH"
