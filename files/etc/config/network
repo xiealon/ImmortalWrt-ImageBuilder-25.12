@@ -17,6 +17,8 @@ config interface 'lan'
 	option gateway '10.0.0.10'
 	list dns '10.0.0.10'
 	option delegate '0'
+	option ip6assign '64'
+	option ip6hint '0'
 
 config interface 'lan6'
 	option proto 'dhcpv6'
