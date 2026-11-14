@@ -631,6 +631,12 @@ build_lan_static() {
         return 1
     fi
     _net_write_guard "lan 静态地址"
+    # ===== lan（IPv4 static）与 lan6（IPv6 dhcpv6）一起写，一次 commit =====
+    # OpenWrt 一个 interface 只能有一个 proto，所以 IPv4/IPv6 必须分成两个段；
+    # 但它们是同一个物理口（lan6 用 device='@lan' 跟随），生命周期完全一致，
+    # 因此配置动作放在同一处、提交一次，避免「lan 提交了、lan6 还在内存里」这种半截状态。
+    #
+    # ---- lan：IPv4 静态 ----
     run uci -q set network.lan.proto='static'
     run uci -q set network.lan.device='br-lan'
     run uci -q set network.lan.ipaddr="$1"
@@ -638,33 +644,25 @@ build_lan_static() {
     run uci -q set network.lan.gateway="$3"
     run uci -q delete network.lan.dns 2>/dev/null
     run uci -q add_list network.lan.dns="$4"
-    log "[LAN] 已写入静态地址 $1/$2 网关 $3 DNS $4"
+    # ---- lan6：IPv6 客户端（跟随 lan 的 device）----
+    # 幂等：已存在就整段覆盖成目标值（不用 if 判断），配置漂移也能一次纠正。
+    run uci -q set network.lan6=interface
+    run uci -q set network.lan6.proto='dhcpv6'
+    run uci -q set network.lan6.device='@lan'
+    run uci -q set network.lan6.reqaddress='try'
+    run uci -q set network.lan6.reqprefix='auto'
+    run uci -q set network.lan6.norelease='1'
+    run uci -q set network.lan6.sendclientid='auto'
+    run uci -q set network.lan6.peerdns='0'
     # 【2026-11-11 用户方案】写完当场 commit：让后面的 snat 节点读 network.lan.ipaddr
     # 时拿到的是落盘后的值，而不是只存在于 /tmp/.uci delta 里的内存态。
     # 真正的 reload 仍由 build_NETBASE 末尾的 flush_uci 统一做（那里还会重接容器 veth），
     # 这里只保证「配置已定稿」，不碰网络。
     if ! run uci -q commit network 2>/dev/null; then
-        log "[LAN] commit network 失败（地址只在内存里，重启即丢）"
+        log "[LAN] commit network 失败（lan/lan6 只在内存里，重启即丢）"
         return 1
     fi
-    # 【2026-11-14 加】确保 lan6（DHCPv6 客户端）存在，缺了就补。
-    # 静态 files/etc/config/network 里已经有一段，但那是"刷机时写一次"；
-    # 这里补的是"运行期自愈"：被 LuCI 删掉、被某个包重置、被手工改坏，--fix 都能补回来。
-    # 和 lan 的做法一致：静态文件管首装，build 管自愈。
-    # 没有 lan6 的后果：br-lan 没有全局 IPv6 地址 → odhcpd 没有前缀可宣告 →
-    # RA 只带 link-local → 下游设备拿不到 IPv6 地址和默认路由。
-    if ! run uci -q show network 2>/dev/null | grep -q '^network\.lan6=interface$'; then
-        run uci -q set network.lan6=interface
-        run uci -q set network.lan6.proto='dhcpv6'
-        run uci -q set network.lan6.device='@lan'
-        run uci -q set network.lan6.reqaddress='try'
-        run uci -q set network.lan6.reqprefix='auto'
-        run uci -q set network.lan6.norelease='1'
-        run uci -q set network.lan6.sendclientid='auto'
-        run uci -q set network.lan6.peerdns='0'
-        run uci -q commit network 2>/dev/null
-        log "[LAN] 补建 lan6（DHCPv6 客户端：reqaddress=try, reqprefix=auto, peerdns=0）"
-    fi
+    log "[LAN] 已提交：lan 静态地址 $1/$2 网关 $3 DNS $4 + lan6（dhcpv6, peerdns=0）"
     return 0
 }
 
