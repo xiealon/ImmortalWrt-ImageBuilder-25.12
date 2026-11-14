@@ -367,6 +367,11 @@ verify_lan_static() {
     # 显式 eui64 后 ULA 地址 = 前缀 + MAC，valid_lft forever。
     # RDNSS 通告的就是这个地址，所以要一起锁。
     [ "$(run uci -q get network.lan.ip6ifaceid 2>/dev/null)" = "eui64" ] || return 1
+    # 【2026-11-15 加】ULA 地址必须真的落在 br-lan 上，不能只看 uci。
+    # 真机现场：netifd 的 assignment 里有 fd80 那一项、local-address 也有值，
+    # 但内核接口上没有 —— uci 全对、ip addr 看不到。这种状态只有判运行时才发现。
+    # 判不过 → 走 build → flush 里 network reload 重新下发，等价于 ifup 一次。
+    run ip -6 addr show br-lan 2>/dev/null | grep -q 'inet6 fd' || return 1
     return 0
 }
 
@@ -691,6 +696,20 @@ build_lan_static() {
         log "[LAN] 为避免把 LAN 写成非法地址导致失联，放弃写入，hard 终止"
         return 1
     fi
+    # 【2026-11-15 加】先等 br-lan 的 link-local 就绪，最多 3 秒。
+    # 真机实测（192.168.1.201，2026-11-15 06:53）：开机时网桥 up 了但 link-local
+    # 还没生成完，lan6 的 dhcpv6 客户端就去发 RS，报
+    #   br-lan: error connecting LLA socket / Failed to send RS (Address not available)
+    # 随后 lan6 反复 up/down，netifd 算 lan 的前缀分配时把 ULA 漏掉 ——
+    # ubus 里 assignment 有 fd80 那一项，但 ip addr 上看不到地址，
+    # 于是 dhcp_ignore 取不到 ULA，RDNSS 配置被跳过。
+    # 这里等一小会儿再往下走，绝大多数情况 0~1 秒就过，不会拖慢开机。
+    _lsw_n=0
+    while [ -z "$(run ip -6 addr show br-lan 2>/dev/null | grep 'inet6 fe80')" ] && [ "$_lsw_n" -lt 6 ]; do
+        sleep 0.5
+        _lsw_n=$((_lsw_n + 1))
+    done
+    [ "$_lsw_n" -gt 0 ] && log "[LAN] 等 br-lan link-local 就绪 ${_lsw_n}00ms"
     _net_write_guard "lan 静态地址"
     # ===== lan（IPv4 static）与 lan6（IPv6 dhcpv6）一起写，一次 commit =====
     # OpenWrt 一个 interface 只能有一个 proto，所以 IPv4/IPv6 必须分成两个段；
@@ -736,6 +755,28 @@ build_lan_static() {
         return 1
     fi
     log "[LAN] 已提交：lan 静态地址 $1/$2 网关 $3 DNS $4 + lan6（dhcpv6, peerdns=0）"
+    # 【2026-11-15 加】commit 之后确认 ULA 地址真的落到了接口上。
+    # 真机实测（192.168.1.201，2026-11-15 07:05）：
+    #   uci 全对、netifd 的 assignment 里也有 fd80 那一项、local-address 也有值，
+    #   但 `ip -6 addr show br-lan` 看不到地址 —— 只有判运行时才发现。
+    # 光靠 flush_uci 里的 network reload 修不了这个状态（实测 reload 后仍是空），
+    # 必须 ifup（= down + up，强制重建），实测 3 秒内地址就回来。
+    # 代价：这一下会断网 1~3 秒，只在「地址确实丢了」时才发生。
+    if ! run ip -6 addr show br-lan 2>/dev/null | grep -q 'inet6 fd'; then
+        log "[LAN] ULA 地址未下发到 br-lan，执行 ifup lan 强制重建"
+        ( sleep 1; ifup lan >/dev/null 2>&1 ) &
+        _luw_n=0
+        while [ "$_luw_n" -lt 20 ]; do
+            sleep 1
+            _luw_n=$((_luw_n + 1))
+            run ip -6 addr show br-lan 2>/dev/null | grep -q 'inet6 fd' && break
+        done
+        if run ip -6 addr show br-lan 2>/dev/null | grep -q 'inet6 fd'; then
+            log "[LAN] ifup 后 ULA 地址已恢复（等待 ${_luw_n}s）"
+        else
+            log "[LAN] ifup 后 ULA 地址仍未恢复（留待探针下轮再试）"
+        fi
+    fi
     return 0
 }
 
