@@ -174,4 +174,32 @@ else
     echo "[$(date '+%F %T')] 【依赖文件】未找到 $PKG_RESTORE，跳过" >>"$LOG"
 fi
 
+# ---- 阶段【adblock】：开机补一次（2026-11-14 加）----
+# adblock 有自己的一套四态判定 + 分级修复（/usr/sbin/adblock/restore.sh）：
+#   0 = 包齐、程序文件齐、配置对     → 一个字都不写
+#   1 = 包不在册                     → 01-pkg.sh（连依赖装）
+#   3 = 包在册、程序文件缺           → 01-pkg.sh（内部转 --force）
+#   4 = 包与文件都齐、配置不对       → 02-config.sh（只改三项结构值）
+# 为什么单独成组：2026-11-10 从 pkg-restore-apps.sh 拆出来，因为它是本机
+# 唯一允许「删了重装」的包（05-rebuild.sh），而重装会冲掉 /etc/config/adblock，
+# 所以判定和修复必须分两套，不能和代理内核那种「只判包级」的混在一起。
+# 排在应用包之后：restore.sh 的 01-pkg 也会 apk add，串行避免包管理器锁冲突。
+ADB_RESTORE=/rom/usr/sbin/adblock/restore.sh
+if [ -x "$ADB_RESTORE" ]; then
+    _run_capped 20 /bin/sh "$ADB_RESTORE" --check >/dev/null 2>&1
+    _adb_rc=$?
+    case "$_adb_rc" in
+    0)
+        echo "[$(date '+%F %T')] 【adblock】包与配置齐全，跳过" >>"$LOG"
+        ;;
+    *)
+        _run_capped 180 /bin/sh "$ADB_RESTORE" >>"$LOG" 2>&1
+        _adb_fix=$?
+        echo "[$(date '+%F %T')] 【adblock】判定码 $_adb_rc，已尝试修复（rc=$_adb_fix，详见上方日志）" >>"$LOG"
+        ;;
+    esac
+else
+    echo "[$(date '+%F %T')] 【adblock】未找到 $ADB_RESTORE，跳过" >>"$LOG"
+fi
+
 exit 0
