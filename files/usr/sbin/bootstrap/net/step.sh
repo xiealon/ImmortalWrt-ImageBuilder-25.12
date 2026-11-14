@@ -352,8 +352,6 @@ verify_dhcp_ignore() {
     [ "$(run uci -q get dhcp.lan.ra 2>/dev/null)" = "server" ] || return 1
     [ "$(run uci -q get dhcp.lan.ra_preference 2>/dev/null)" = "high" ] || return 1
     [ "$(run uci -q get dhcp.lan.dns_service 2>/dev/null)" = "1" ] || return 1
-    [ "$(run uci -q get dhcp.lan.ra_management 2>/dev/null)" = "0" ] || return 1
-    [ "$(run uci -q get dhcp.lan.ra_flags 2>/dev/null)" = "none" ] || return 1
     for _dm in $(run uci show dhcp 2>/dev/null | grep -E '=dnsmasq$' | cut -d. -f2 | cut -d= -f1); do
         [ -z "$(run uci -q get "dhcp.$_dm.authoritative" 2>/dev/null)" ] || return 1
     done
@@ -669,8 +667,9 @@ build_dhcp_ignore() {
     # 为什么必须自己发 RA：
     #   1) ra_preference=high  → Windows 收到 metric 16，光猫 medium 是 256
     #   2) interval=30-60s     → 比光猫（200-600s）发得勤；Windows 只保留最后到的 RDNSS
-    #   3) ra_management=0 + ra_flags=none → 显式写死 M=0 O=0
-    #      （odhcpd 默认 other-config 会让 O=1，设备会发无用的 DHCPv6 Information-request）
+    # 说明：ra_management / ra_flags 故意不写死，交给 odhcpd 默认值和 LuCI 控制。
+    # 副作用是 odhcpd 默认 other-config 会让 O=1，设备会多发一次无用的
+    # DHCPv6 Information-request（超时后回退到 RDNSS），不影响功能。
     run uci -q delete dhcp.lan.ignore
     run uci -q set dhcp.lan.dhcpv4='disabled'
     run uci -q set dhcp.lan.ra='server'
@@ -678,8 +677,6 @@ build_dhcp_ignore() {
     run uci -q set dhcp.lan.dns_service='1'
     run uci -q set dhcp.lan.ra_mininterval='30'
     run uci -q set dhcp.lan.ra_maxinterval='60'
-    run uci -q set dhcp.lan.ra_management='0'
-    run uci -q set dhcp.lan.ra_flags='none'
     # 所有 dnsmasq 段删掉 authoritative：旁路由不是权威 DHCP，避免抢答
     for _dm in $(run uci show dhcp 2>/dev/null | grep -E '=dnsmasq$' | cut -d. -f2 | cut -d= -f1); do
         run uci -q delete "dhcp.$_dm.authoritative" 2>/dev/null
@@ -690,7 +687,7 @@ build_dhcp_ignore() {
     # 所以让位跟着 smartdns 的接管结果走（port=53 + auto_set_dnsmasq=1 时，
     # 由 smartdns 自己的 init 让 dnsmasq 退出 53，见 pkg-restore-smartdns.sh 文件头）：
     # 能接管了才放手，接管不了就继续让 dnsmasq 顶着。
-    log "[DHCP] IPv6 RA 已接管：ra=server pref=high dns_service=1 interval=30-60s flags=none（IPv4 DHCP 仍关闭）"
+    log "[DHCP] IPv6 RA 已接管：ra=server pref=high dns_service=1 interval=30-60s（IPv4 DHCP 仍关闭）"
     return 0
 }
 
