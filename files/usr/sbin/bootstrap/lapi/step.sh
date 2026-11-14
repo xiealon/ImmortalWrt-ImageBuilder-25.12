@@ -89,6 +89,10 @@ verify_bouncer_fill() {
     [ "$(run uci -q get "$_sec.api_url" 2>/dev/null)" = "http://${CONTAINER_IP}:${LAPI_PORT}/" ] || return 1
     [ "$(run uci -q get "$_sec.enabled" 2>/dev/null)" = "1" ] || return 1
     [ -n "$(run uci -q get "$_sec.api_key" 2>/dev/null)" ] || return 1
+    # 【2026-11-14 加】双栈必须都开：只开 IPv4 时 ip6 crowdsec6 表是空的，
+    # IPv6 侧的攻击/封禁完全不起作用，而日志里看不出来（表在、链在、就是没有条目）。
+    [ "$(run uci -q get "$_sec.ipv4" 2>/dev/null)" = "1" ] || return 1
+    [ "$(run uci -q get "$_sec.ipv6" 2>/dev/null)" = "1" ] || return 1
     return 0
 }
 build_bouncer_fill() {
@@ -169,7 +173,12 @@ _bouncer_uci_apply() {
     run uci -q set "$_sec.api_url=http://${CONTAINER_IP}:${LAPI_PORT}/"
     run uci -q set "$_sec.enabled=1"
     run uci -q set "$_sec.ipv4=1"
-    run uci -q set "$_sec.ipv6=0"
+    # 【2026-11-14 用户定】ipv6 从 0 改成 1。
+    # 原来强制 0：bouncer 只处理 IPv4 决策，ip6 crowdsec6 表虽然建了却永远空着，
+    # 于是「IPv6 侧被封的地址」不会被 drop —— 双栈环境下等于放掉一半。
+    # 改成 1 后 bouncer 同时消费 LAPI 的 IPv4/IPv6 决策，两张表都生效。
+    # 前提：内核已开 net.ipv6.conf.all.forwarding（本机为 1，由 fw4 保证）。
+    run uci -q set "$_sec.ipv6=1"
     run uci -q set "$_sec.deny_action=drop"
     run uci -q set "$_sec.filter_input=1"
     run uci -q set "$_sec.filter_forward=1"
