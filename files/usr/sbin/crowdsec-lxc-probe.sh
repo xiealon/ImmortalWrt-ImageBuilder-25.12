@@ -1247,7 +1247,12 @@ while true; do
         P_SLEEP_HINT=0
     elif [ "${P_STALL:-0}" -gt 0 ] || [ "${P_PULL_POST:-0}" = "1" ]; then
         _sleep_s="$PROBE_RECHECK_GAP"
-    elif [ "${P_KMOD_BAD:-0}" -gt 0 ] || [ "${P_APP_BAD:-0}" -gt 0 ]; then
+    elif [ "${P_KMOD_BAD:-0}" -gt 0 ] || [ "${P_APP_BAD:-0}" -gt 0 ] \
+         || [ "${P_AUDIT_BAD:-0}" -gt 0 ]; then
+        # 【2026-11-14 加】体测（--verify-only）判不符后也进快节奏。
+        # 原来 P_AUDIT_BAD 只是加 1，不影响轮间隔，要等下一次体测轮（PROBE_AUDIT_EVERY=3，
+        # 最坏 30 分钟）才再判一次；加上这条后，判不符→60s 后重判→再 60s→三次都坏就修，
+        # 总耗时从「30 分钟 + 2 分钟」压到「2~3 分钟」。
         # 【2026-11-10.0422】依赖文件通道（pkg-restore 的 _DEPS_PKGS）也进加速。
         # 原来它只在 600s 一轮里推进：2 轮 = 20 分钟才轮到 --deps --repair，
         # 而 last_pull 那套早就把同一件事论证清楚了 —— 判定次数不变、阈值不变，
