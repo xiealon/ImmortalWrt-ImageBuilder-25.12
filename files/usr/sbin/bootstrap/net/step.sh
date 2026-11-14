@@ -336,6 +336,13 @@ verify_lan_static() {
     # 这里补一条运行时判据：网卡上必须真能看到 $1/。看不到就返回 1，
     # 让 build_lan_static 重写配置并触发 network reload。
     run ip -4 addr show br-lan 2>/dev/null | grep -q "inet $1/" || return 1
+    # 【2026-11-14 加】lan6 必须存在。
+    # 补建逻辑挂在 build_lan_static 末尾，而 build 只在本函数返回 1 时才跑；
+    # 原来不判 lan6，于是「IP 全对但 lan6 缺失」会判通过 → 补建永远不执行，
+    # 表现为 --fix 跑完 lan6 还是没有（2026-11-14 在 192.168.1.201 实测踩到）。
+    # 没有 lan6 的后果：br-lan 拿不到 DHCPv6 地址（如果上游只发 DHCPv6），
+    # 且防火墙 lan zone 里那条 lan6 成了悬空项。
+    run uci -q show network 2>/dev/null | grep -q '^network\.lan6=interface$' || return 1
     return 0
 }
 
