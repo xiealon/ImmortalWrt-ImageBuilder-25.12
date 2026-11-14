@@ -86,10 +86,7 @@ PROBE_FAIL_ALERT="${CS_PROBE_FAIL_ALERT:-3}"
 # AUDIT_EVERY 轮做一次从头到脚的体检。0 = 关闭。
 # 〔2026-11-09 用户定〕30 轮 x 600s = 5 小时，太长。改成 3 轮 = 30 分钟，
 # 与改动前（30 轮 x 60s）等价。--verify-only 只读不写，单次 20~40 秒。
-PROBE_AUDIT_EVERY="${CS_PROBE_AUDIT_EVERY:-1}"
-# 【2026-11-14 改】默认从 3 改成 1：网络配置（RA/DHCPv4）每轮都验，
-# 发现不符时按 PROBE_AUDIT_GAP=60s 重试两次，三次都坏就 _run_fix。
-# 代价：每轮多一次 --verify-only（28 节点，20~40s），占 10 分钟周期的 3~6%。
+PROBE_AUDIT_EVERY="${CS_PROBE_AUDIT_EVERY:-3}"
 # 【2026-11-09 用户定】体检不符后，隔这么多秒再判第二次、第三次；
 # 三次都不符才动手。60s 是用户给的下限，配两次复验约 3 分钟出结论。
 PROBE_AUDIT_GAP="${CS_PROBE_AUDIT_GAP:-60}"
@@ -843,6 +840,30 @@ probe_tick() {
     #   · 链路有效才复检，两次都不符才认定是真漂移 → 重跑 ①（它会自己先验后补）。
     # 这样 ③ 永远不会在「bouncer 拉不动」时抢跑，避免和 ② 各拉一次 ①。
     P_ROUND=$((${P_ROUND:-0} + 1))
+    # 【2026-11-14 加】每轮轻检 net 组（含 dhcp_ignore 的 RA/DHCPv4 开关），实测约 4 秒。
+    # 全量 --verify-only（28 节点，20~40s）仍然每 PROBE_AUDIT_EVERY 轮跑一次，
+    # 这里只把「网络这块」提到每轮，代价小、发现快：
+    #   第 1 轮不符 → 计数 1；第 2 轮还不符（10 分钟后）→ 重跑引导修。
+    # 比原来「等体测轮（30 分钟）」快得多，又不动全量体测的节奏。
+    if [ -x "$SROOT/usr/sbin/bootstrap/net/step.sh" ]; then
+        _net_rc=0
+        _cap 60 sh "$SROOT/usr/sbin/bootstrap/net/step.sh" --check >/dev/null 2>&1 || _net_rc=$?
+        if [ "$_net_rc" != "0" ]; then
+            P_NET_BAD=$((${P_NET_BAD:-0} + 1))
+            plog "【网络】第 ${P_ROUND} 轮 net 组不符（累计 ${P_NET_BAD} 次）"
+            if [ "$P_NET_BAD" -ge 2 ]; then
+                P_ACTION="net-fix"
+                plog "【网络】连续 ${P_NET_BAD} 轮不符，重跑引导补齐"
+                _run_fix
+                P_NET_BAD=0
+            fi
+        else
+            if [ "${P_NET_BAD:-0}" -gt 0 ]; then
+                plog "【网络】已恢复正常（此前连续 ${P_NET_BAD} 轮不符）"
+            fi
+            P_NET_BAD=0
+        fi
+    fi
     if [ "${PROBE_AUDIT_EVERY:-0}" -gt 0 ] 2>/dev/null \
        && [ $((P_ROUND % PROBE_AUDIT_EVERY)) -eq 0 ]; then
         if _boot --verify-only >>"$BOOT_LOG" 2>&1; then
