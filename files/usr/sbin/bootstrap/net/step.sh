@@ -369,8 +369,6 @@ verify_dhcp_ignore() {
     [ -z "$(run uci -q get dhcp.lan.ignore 2>/dev/null)" ] || return 1
     [ "$(run uci -q get dhcp.lan.dhcpv4 2>/dev/null)" = "disabled" ] || return 1
     [ "$(run uci -q get dhcp.lan.ra 2>/dev/null)" = "server" ] || return 1
-    # 【2026-11-14 加】DHCPv6 服务器模式，与上面 lan.ip6assign 成对
-    [ "$(run uci -q get dhcp.lan.dhcpv6 2>/dev/null)" = "server" ] || return 1
     [ "$(run uci -q get dhcp.lan.ra_preference 2>/dev/null)" = "high" ] || return 1
     [ "$(run uci -q get dhcp.lan.dns_service 2>/dev/null)" = "1" ] || return 1
     for _dm in $(run uci show dhcp 2>/dev/null | grep -E '=dnsmasq$' | cut -d. -f2 | cut -d= -f1); do
@@ -728,12 +726,11 @@ build_dhcp_ignore() {
     run uci -q delete dhcp.lan.ignore
     run uci -q set dhcp.lan.dhcpv4='disabled'
     run uci -q set dhcp.lan.ra='server'
-    # 【2026-11-14 加】DHCPv6 服务器模式（用户定：界面里这项得开）。
-    # 固件里 /rom/etc/uci-defaults/15_odhcpd 首次启动会写 dhcpv6=disabled，
-    # 这里覆盖成 server，否则刷机后每次都要手工去 LuCI 点一次。
-    # 前提是 lan 上有 ip6assign 分配到的 PD 前缀，没有前缀时它发不出地址，
-    # 甚至会退回去用上游 SLAAC 那一段（与光猫撞段），两项必须成对存在。
-    run uci -q set dhcp.lan.dhcpv6='server'
+    # 【2026-11-14 用户定】不写 dhcpv6：地址由 SLAAC 下发，不需要有状态 DHCPv6。
+    # 实测（192.168.1.201）：dhcpv6 关着，Windows 一样从 RA 拿到 8c01 段地址
+    # （PrefixOrigin=RouterAdvertisement）。开着反而有风险——一旦 ra_flags 带
+    # managed-config，它会真去分配地址，可能又抢到光猫的 8c00 段。
+    # 固件 /rom/etc/uci-defaults/15_odhcpd 本来就写 disabled，保持默认即可。
     run uci -q set dhcp.lan.ra_preference='high'
     run uci -q set dhcp.lan.dns_service='1'
     run uci -q set dhcp.lan.ra_mininterval='30'
