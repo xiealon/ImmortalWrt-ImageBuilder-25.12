@@ -1253,15 +1253,12 @@ while true; do
     # 顺序必须在 probe_tick 之后：probe_tick 会覆盖 P_ACTION，
     # 本通道的 kmods-* 标签要最后落盘才看得见。
     # 代价：每轮多一次 --deps --check（只读包内清单 + [ -e ]，实测约 6 ms）。
-    _kmods_watch
-    # 【2026-11-10.0518】应用主程序通道同样挂回。和 _kmods_watch 是同一个病：
-    # 只有定义没有调用点，P_APP_BAD 恒为 0，rc.local 第 155 行只在开机跑一次。
-    # 注意本通道**没有** 60s 加速分支（加速名单只有 P_UP_BAD / P_STALL /
-    # P_PULL_POST / P_KMOD_BAD），所以它就是老老实实每 10 分钟查一次，
-    # 连续 2 轮缺才动手 —— 这是用户定的「保持原样」，此处只补上缺失的调用点。
-    # 放在 _kmods_watch 之后：两者都写 P_ACTION，若同时异常只留后者标签，
-    # 一次只有一个坏是常态，不必为此加并发状态机。
-    _apps_watch
+    # 【2026-11-14 用户定】应用包与依赖文件的恢复只在**开机**跑一次（rc.local L152-175），
+    # 不再进探针主循环 —— 与 adblock（rc.local L177）同节奏。
+    # 理由：包被删不影响转发，开机补一次够用；探针只留 last_pull / DNS / 网络 / bouncer。
+    # 函数定义保留在下方，需要挂回时把下面两行的注释去掉即可。
+    # _kmods_watch
+    # _apps_watch
     _probe_save
     # 【2026-11-09 用户定】包缓存体检也归到「每次开机只跑一次」，与应用包同频。
     if [ ! -f /tmp/.cs-pkgcache-once ]; then
