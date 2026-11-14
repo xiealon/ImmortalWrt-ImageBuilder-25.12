@@ -268,6 +268,11 @@ verify_bridge() {
 
 # LAN zone 放行独立验证（定责 name=lan）：input/forward 必须 ACCEPT
 verify_lan_input() {
+    # 【2026-11-14 加】lan6 必须在 lan zone 的 network 列表里，否则 IPv6 被默认策略丢掉
+    _vlz=$(_zone_sec lan) 2>/dev/null
+    if [ -n "$_vlz" ]; then
+        run uci -q show "firewall.$_vlz" 2>/dev/null | grep -q "lan6" || return 1
+    fi
     _lz=$(_zone_sec lan) || { log "[FW] 未找到 lan zone，本轮不校验 input/forward"; return 0; }
     [ "$(run uci -q get firewall.$_lz.input 2>/dev/null)" = "ACCEPT" ] || return 1
     [ "$(run uci -q get firewall.$_lz.forward 2>/dev/null)" = "ACCEPT" ] || return 1
@@ -834,7 +839,14 @@ build_lan_input() {
     _lz=$(_zone_sec lan) || { log "[FW] 无 lan zone，跳过"; return 0; }
     run uci -q set "firewall.$_lz.input=ACCEPT"
     run uci -q set "firewall.$_lz.forward=ACCEPT"
-    log "[FW] lan zone input/forward 已置 ACCEPT"
+    # 【2026-11-14 加】确保 lan6 在这个 zone 的 network 列表里。
+    # lan6 是独立 UCI 接口（不是 lan 的别名），fw4 按接口名匹配 zone；
+    # 不在列表里 → IPv6 包不属于任何 zone → 按默认策略 DROP。
+    if ! run uci -q show "firewall.$_lz" 2>/dev/null | grep -q "lan6"; then
+        run uci -q add_list "firewall.$_lz.network=lan6"
+        log "[FW] lan zone 已纳入 lan6"
+    fi
+    log "[FW] lan zone input/forward 已置 ACCEPT（含 lan6）"
     return 0
 }
 # 旁路由网络基线入口（v.78-bp）：五对象独立预检，哪项不符只重建哪项
