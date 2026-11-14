@@ -635,6 +635,24 @@ build_lan_static() {
         log "[LAN] commit network 失败（地址只在内存里，重启即丢）"
         return 1
     fi
+    # 【2026-11-14 加】确保 lan6（DHCPv6 客户端）存在，缺了就补。
+    # 静态 files/etc/config/network 里已经有一段，但那是"刷机时写一次"；
+    # 这里补的是"运行期自愈"：被 LuCI 删掉、被某个包重置、被手工改坏，--fix 都能补回来。
+    # 和 lan 的做法一致：静态文件管首装，build 管自愈。
+    # 没有 lan6 的后果：br-lan 没有全局 IPv6 地址 → odhcpd 没有前缀可宣告 →
+    # RA 只带 link-local → 下游设备拿不到 IPv6 地址和默认路由。
+    if ! run uci -q show network 2>/dev/null | grep -q '^network\.lan6=interface$'; then
+        run uci -q set network.lan6=interface
+        run uci -q set network.lan6.proto='dhcpv6'
+        run uci -q set network.lan6.device='@lan'
+        run uci -q set network.lan6.reqaddress='try'
+        run uci -q set network.lan6.reqprefix='auto'
+        run uci -q set network.lan6.norelease='1'
+        run uci -q set network.lan6.sendclientid='auto'
+        run uci -q set network.lan6.peerdns='0'
+        run uci -q commit network 2>/dev/null
+        log "[LAN] 补建 lan6（DHCPv6 客户端：reqaddress=try, reqprefix=auto, peerdns=0）"
+    fi
     return 0
 }
 
