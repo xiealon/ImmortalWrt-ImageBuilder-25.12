@@ -343,7 +343,8 @@ verify_dhcp_ignore() {
     if run uci show dhcp 2>/dev/null | grep -q '^dhcp\.lan=dhcp$'; then
         _vdi_has=1
     fi
-    [ "$_vdi_has" = "1" ] || return 0
+    # 【2026-11-14 改】段不存在 = 需要修复（build 会把段建起来）
+    [ "$_vdi_has" = "1" ] || return 1
     # 【2026-11-14 改】旁路由改为「自己发 RA 抢默认路由/DNS」，不再是「关 RA」。
     # 验的是 build 写进去的那套值，任一项不符就判需修复。
     [ -z "$(run uci -q get dhcp.lan.ignore 2>/dev/null)" ] || return 1
@@ -649,9 +650,17 @@ build_dhcp_ignore() {
     if run uci show dhcp 2>/dev/null | grep -q '^dhcp\.lan=dhcp$'; then
         _bdi_has=1
     fi
+    # 【2026-11-14 改】段不存在就建，不再跳过。
+    # 原逻辑（v.180.94）是「缺段 = 用户主动删了 = 已关闭，别替用户建回来」，
+    # 那套只适用于「旁路由完全不管 DHCP」。现在要发 RA，而 RA 配置就存在
+    # dhcp.lan 段里，缺段等于永远开不了 RA，所以改成先建再配。
     if [ "$_bdi_has" != "1" ]; then
-        log "[DHCP] 无 dhcp.lan 段（LAN 不提供 DHCP），跳过让权"
-        return 0
+        run uci set dhcp.lan=dhcp
+        run uci set dhcp.lan.interface='lan'
+        run uci set dhcp.lan.start='231'
+        run uci set dhcp.lan.limit='20'
+        run uci set dhcp.lan.leasetime='12h'
+        log "[DHCP] 无 dhcp.lan 段，已新建（interface=lan, pool=231-250）"
     fi
     # 【2026-11-14 改】旁路由不再「关 RA」，改成「自己发 RA 抢默认路由和 DNS」
     # 原设计是把 DHCP/RA 全部让给光猫（ignore=1 + 删 ra/dhcpv6/ndp/ra_management）。
