@@ -477,7 +477,13 @@ _rom_restore_lxc() {
 # 让后面的恢复记账错位 —— 那也是 v.180.149 起「不拷文件、只装包」这套口径的边界。
 verify_svc_bind() {
     _wn=$(_zone_lan_network) || { log "[服务] 无 name=lan 的 zone，本轮不校验管理服务绑定"; return 0; }
-    [ "$(run uci -q get dropbear.@dropbear[0].Interface 2>/dev/null)" = "$_wn" ] || return 1
+    # 【2026-11-14 修】dropbear 的 Interface 只接受**单个**接口名。
+    # lan zone 纳入 lan6 之后，_zone_lan_network 返回的是「lan lan6」，
+    # 整串塞进去 dropbear 会报：
+    #   Option 'Interface' should specify SINGLE interface but instead it lists interfaces: lan lan6
+    # 取第一个（lan）即可 —— dropbear 只需要绑 br-lan 这个 L3 设备，lan6 与它同设备。
+    _wn1=$(printf '%s' "$_wn" | awk '{print $1}')
+    [ "$(run uci -q get dropbear.@dropbear[0].Interface 2>/dev/null)" = "$_wn1" ] || return 1
     return 0
 }
 
@@ -514,10 +520,13 @@ verify_docker_fw() {
 # 【v.108.40】ttyd 不再处理（本机不用网页终端）。
 build_svc_bind() {
     _wn=$(_zone_lan_network) || { log "[服务] 无 name=lan 的 zone，跳过管理服务绑定"; return 0; }
-    run uci -q set dropbear.@dropbear[0].Interface="$_wn"
+    # 【2026-11-14 修】只取第一个网络名。原因见 verify_svc_bind 的注释：
+    # lan zone 纳入 lan6 后 _zone_lan_network 返回「lan lan6」，dropbear 不接受多接口。
+    _wn1=$(printf '%s' "$_wn" | awk '{print $1}')
+    run uci -q set dropbear.@dropbear[0].Interface="$_wn1"
     run uci -q commit dropbear 2>/dev/null
     run /etc/init.d/dropbear reload >/dev/null 2>&1 || true
-    log "[服务] dropbear 绑定 $_wn"
+    log "[服务] dropbear 绑定 $_wn1（lan zone 里有：$_wn，只绑第一个）"
     return 0
 }
 
