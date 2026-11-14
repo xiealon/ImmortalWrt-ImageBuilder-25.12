@@ -343,6 +343,14 @@ verify_lan_static() {
     # 没有 lan6 的后果：br-lan 拿不到 DHCPv6 地址（如果上游只发 DHCPv6），
     # 且防火墙 lan zone 里那条 lan6 成了悬空项。
     run uci -q show network 2>/dev/null | grep -q '^network\.lan6=interface$' || return 1
+    # 【2026-11-14 加】IPv6 前缀分配（用户实测确认）。
+    # 位置必须在 lan 上，不能放 lan6：lan6 是 PD 的提供方，给它设 ip6assign 等于
+    # 从自己的池里再切一块给自己，netifd 会直接报
+    #   Failed to assign requested subprefix of size 64 for lan6, trying other
+    # 结果 local-address 为空、br-lan 拿不到前缀，odhcpd 只能退回去用上游 SLAAC
+    # 那一段（光猫的 8c00），分配出与光猫同段的地址（真机 2026-11-14 踩到）。
+    [ "$(run uci -q get network.lan.ip6assign 2>/dev/null)" = "64" ] || return 1
+    [ "$(run uci -q get network.lan.ip6hint 2>/dev/null)" = "0" ] || return 1
     return 0
 }
 
@@ -362,6 +370,8 @@ verify_dhcp_ignore() {
     [ -z "$(run uci -q get dhcp.lan.ignore 2>/dev/null)" ] || return 1
     [ "$(run uci -q get dhcp.lan.dhcpv4 2>/dev/null)" = "disabled" ] || return 1
     [ "$(run uci -q get dhcp.lan.ra 2>/dev/null)" = "server" ] || return 1
+    # 【2026-11-14 加】DHCPv6 服务器模式，与上面 lan.ip6assign 成对
+    [ "$(run uci -q get dhcp.lan.dhcpv6 2>/dev/null)" = "server" ] || return 1
     [ "$(run uci -q get dhcp.lan.ra_preference 2>/dev/null)" = "high" ] || return 1
     [ "$(run uci -q get dhcp.lan.dns_service 2>/dev/null)" = "1" ] || return 1
     for _dm in $(run uci show dhcp 2>/dev/null | grep -E '=dnsmasq$' | cut -d. -f2 | cut -d= -f1); do
@@ -663,6 +673,13 @@ build_lan_static() {
     run uci -q set network.lan6.norelease='1'
     run uci -q set network.lan6.sendclientid='auto'
     run uci -q set network.lan6.peerdns='0'
+    # ---- lan：IPv6 前缀分配（用户 2026-11-14 定：长度 64、hint 0）----
+    # ip6assign='64'：从 lan6 向光猫要到的 PD 池里切一段 /64 给 lan
+    # ip6hint='0'   ：取池里第 0 个子网（光猫只给 1 个 /64 时即唯一那段）
+    # 为什么必须写在 lan 而不是 lan6：见 verify_lan_static 里的注释——
+    # 写在 lan6 上 netifd 会报 subprefix 分配失败，且 odhcpd 会拿错前缀。
+    run uci -q set network.lan.ip6assign='64'
+    run uci -q set network.lan.ip6hint='0'
     # 【2026-11-11 用户方案】写完当场 commit：让后面的 snat 节点读 network.lan.ipaddr
     # 时拿到的是落盘后的值，而不是只存在于 /tmp/.uci delta 里的内存态。
     # 真正的 reload 仍由 build_NETBASE 末尾的 flush_uci 统一做（那里还会重接容器 veth），
@@ -710,6 +727,12 @@ build_dhcp_ignore() {
     run uci -q delete dhcp.lan.ignore
     run uci -q set dhcp.lan.dhcpv4='disabled'
     run uci -q set dhcp.lan.ra='server'
+    # 【2026-11-14 加】DHCPv6 服务器模式（用户定：界面里这项得开）。
+    # 固件里 /rom/etc/uci-defaults/15_odhcpd 首次启动会写 dhcpv6=disabled，
+    # 这里覆盖成 server，否则刷机后每次都要手工去 LuCI 点一次。
+    # 前提是 lan 上有 ip6assign 分配到的 PD 前缀，没有前缀时它发不出地址，
+    # 甚至会退回去用上游 SLAAC 那一段（与光猫撞段），两项必须成对存在。
+    run uci -q set dhcp.lan.dhcpv6='server'
     run uci -q set dhcp.lan.ra_preference='high'
     run uci -q set dhcp.lan.dns_service='1'
     run uci -q set dhcp.lan.ra_mininterval='30'
