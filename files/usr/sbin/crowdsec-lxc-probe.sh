@@ -849,17 +849,32 @@ probe_tick() {
         _net_rc=0
         _cap 60 sh "$SROOT/usr/sbin/bootstrap/net/step.sh" --check >/dev/null 2>&1 || _net_rc=$?
         if [ "$_net_rc" != "0" ]; then
-            P_NET_BAD=$((${P_NET_BAD:-0} + 1))
-            plog "【网络】第 ${P_ROUND} 轮 net 组不符（累计 ${P_NET_BAD} 次）"
-            if [ "$P_NET_BAD" -ge 2 ]; then
+            # 第 1 次不符不立刻动手：留 PROBE_AUDIT_GAP（60s）×2 给网络自愈窗口，
+            # 两次复验都不符才认定是真漂移，与全量体测的「首发 + 2 次重试」同节奏。
+            # 全程 10 分钟（等本轮）+ 2 分钟（60s×2）= 12 分钟出结论。
+            plog "【网络】第 ${P_ROUND} 轮 net 组不符，${PROBE_AUDIT_GAP}s 后复验"
+            _net_ok=0
+            _net_n=0
+            while [ "$_net_n" -lt 2 ]; do
+                sleep "$PROBE_AUDIT_GAP"
+                _net_n=$((_net_n + 1))
+                if _cap 60 sh "$SROOT/usr/sbin/bootstrap/net/step.sh" --check >/dev/null 2>&1; then
+                    _net_ok=1
+                    break
+                fi
+            done
+            if [ "$_net_ok" = "1" ]; then
+                plog "【网络】第 ${_net_n} 次复验通过（偶发），不动现场"
+                P_ACTION="net-retry-ok"
+            else
                 P_ACTION="net-fix"
-                plog "【网络】连续 ${P_NET_BAD} 轮不符，重跑引导补齐"
+                plog "【网络】连续 3 次都不符，重跑引导补齐"
                 _run_fix
-                P_NET_BAD=0
             fi
+            P_NET_BAD=0
         else
             if [ "${P_NET_BAD:-0}" -gt 0 ]; then
-                plog "【网络】已恢复正常（此前连续 ${P_NET_BAD} 轮不符）"
+                plog "【网络】已恢复正常"
             fi
             P_NET_BAD=0
         fi
