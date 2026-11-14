@@ -343,6 +343,18 @@ verify_lan_static() {
     # 没有 lan6 的后果：br-lan 拿不到 DHCPv6 地址（如果上游只发 DHCPv6），
     # 且防火墙 lan zone 里那条 lan6 成了悬空项。
     run uci -q show network 2>/dev/null | grep -q '^network\.lan6=interface$' || return 1
+    # 【2026-11-15 用户定】lan6 的七个 option 也锁死。
+    # 原来只判「段存在」：段在、但 proto 被改成 static 或 peerdns 被改成 1 时，
+    # verify 照样判通过 → build 不跑 → 配置一直是坏的却没人发现。
+    # 改错的后果：proto 不对则 br-lan 拿不到 DHCPv6 地址；peerdns=1 则上游 DNS
+    # 会写进 resolv.conf.auto，和本机 smartdns 抢解析。
+    [ "$(run uci -q get network.lan6.proto 2>/dev/null)" = "dhcpv6" ] || return 1
+    [ "$(run uci -q get network.lan6.device 2>/dev/null)" = "@lan" ] || return 1
+    [ "$(run uci -q get network.lan6.reqaddress 2>/dev/null)" = "try" ] || return 1
+    [ "$(run uci -q get network.lan6.reqprefix 2>/dev/null)" = "auto" ] || return 1
+    [ "$(run uci -q get network.lan6.norelease 2>/dev/null)" = "1" ] || return 1
+    [ "$(run uci -q get network.lan6.sendclientid 2>/dev/null)" = "auto" ] || return 1
+    [ "$(run uci -q get network.lan6.peerdns 2>/dev/null)" = "0" ] || return 1
     # 【2026-11-14 加】IPv6 前缀分配（用户实测确认）。
     # 位置必须在 lan 上，不能放 lan6：lan6 是 PD 的提供方，给它设 ip6assign 等于
     # 从自己的池里再切一块给自己，netifd 会直接报
@@ -379,6 +391,18 @@ verify_dhcp_ignore() {
               | awk '{print $2}' | cut -d/ -f1 | head -n1)
     [ -n "$_vdi_ll" ] || return 1
     [ "$(run uci -q get dhcp.lan.dns 2>/dev/null)" = "$_vdi_ll" ] || return 1
+    # 【2026-11-15 用户定】RA 间隔与 dhcp.lan 段的四项也锁死。
+    # 原来 build 会写、verify 不判：被手改后照样判通过，坏值一直留着。
+    #   · ra_min/maxinterval 被改大 → 抢不过光猫（它 200-600s），Windows 的 RDNSS 会被覆盖；
+    #   · interface 被改错 → odhcpd 服务到别的接口，RA 发不出去；
+    #   · start/limit/leasetime 是 DHCPv4 池，dhcpv4 关着时无实际作用，但写死了
+    #     才能保证「段被重建」时不出现两套口径。
+    [ "$(run uci -q get dhcp.lan.ra_mininterval 2>/dev/null)" = "30" ] || return 1
+    [ "$(run uci -q get dhcp.lan.ra_maxinterval 2>/dev/null)" = "60" ] || return 1
+    [ "$(run uci -q get dhcp.lan.interface 2>/dev/null)" = "lan" ] || return 1
+    [ "$(run uci -q get dhcp.lan.start 2>/dev/null)" = "231" ] || return 1
+    [ "$(run uci -q get dhcp.lan.limit 2>/dev/null)" = "20" ] || return 1
+    [ "$(run uci -q get dhcp.lan.leasetime 2>/dev/null)" = "12h" ] || return 1
     for _dm in $(run uci show dhcp 2>/dev/null | grep -E '=dnsmasq$' | cut -d. -f2 | cut -d= -f1); do
         [ -z "$(run uci -q get "dhcp.$_dm.authoritative" 2>/dev/null)" ] || return 1
     done
@@ -527,6 +551,10 @@ verify_docker_fw() {
     # 或者丢掉 proto 时 verify 仍判就绪，规则实际是坏的却不重建。
     [ "$(run uci -q get firewall.lan2docker.target 2>/dev/null)" = "ACCEPT" ] || return 1
     [ "$(run uci -q get firewall.lan2docker.proto 2>/dev/null)" = "all" ] || return 1
+    # 【2026-11-15 加】docker2wan 必须不存在（v.180.81 因 wan zone 已删而移除）。
+    # build 里有 delete，但 verify 没判：被 LuCI 或手工加回来时没人发现，
+    # 而 dest 指向不存在的 zone 会让 fw4 整表加载失败（firewall/network reload 卡死）。
+    [ -z "$(run uci -q get firewall.docker2wan 2>/dev/null)" ] || return 1
     return 0
 }
 
@@ -715,12 +743,16 @@ build_dhcp_ignore() {
     # dhcp.lan 段里，缺段等于永远开不了 RA，所以改成先建再配。
     if [ "$_bdi_has" != "1" ]; then
         run uci set dhcp.lan=dhcp
-        run uci set dhcp.lan.interface='lan'
-        run uci set dhcp.lan.start='231'
-        run uci set dhcp.lan.limit='20'
-        run uci set dhcp.lan.leasetime='12h'
-        log "[DHCP] 无 dhcp.lan 段，已新建（interface=lan, pool=231-250）"
+        log "[DHCP] 无 dhcp.lan 段，已新建"
     fi
+    # 【2026-11-15 用户定】段内四项改为无条件写死，不再只在新建时写。
+    # 原来只在建段时 set：段已存在但被手改（例如 interface 改成 lan6）时 build 不修，
+    # 而 verify 一旦判这几项就会「判不过 → build 不修 → 永远判不过」死循环。
+    # 写成无条件后，check/fix 两侧口径一致。
+    run uci -q set dhcp.lan.interface='lan'
+    run uci -q set dhcp.lan.start='231'
+    run uci -q set dhcp.lan.limit='20'
+    run uci -q set dhcp.lan.leasetime='12h'
     # 【2026-11-14 改】旁路由不再「关 RA」，改成「自己发 RA 抢默认路由和 DNS」
     # 原设计是把 DHCP/RA 全部让给光猫（ignore=1 + 删 ra/dhcpv6/ndp/ra_management）。
     # 现在改成：IPv4 DHCP 仍然不发（dhcpv4=disabled），但 IPv6 RA 由本机发，
