@@ -362,6 +362,11 @@ verify_lan_static() {
     # 结果 local-address 为空、br-lan 拿不到前缀，odhcpd 只能退回去用上游 SLAAC
     # 那一段（光猫的 8c00），分配出与光猫同段的地址（真机 2026-11-14 踩到）。
     [ "$(run uci -q get network.lan.ip6assign 2>/dev/null)" = "64" ] || return 1
+    # 【2026-11-15 加】ip6ifaceid 必须显式 eui64。
+    # 不设时 netifd 给的接口地址是 ::1，实测反复变 deprecated；
+    # 显式 eui64 后 ULA 地址 = 前缀 + MAC，valid_lft forever。
+    # RDNSS 通告的就是这个地址，所以要一起锁。
+    [ "$(run uci -q get network.lan.ip6ifaceid 2>/dev/null)" = "eui64" ] || return 1
     return 0
 }
 
@@ -388,19 +393,13 @@ verify_dhcp_ignore() {
     # 【2026-11-15 加】RDNSS 必须指向本机 br-lan 当前的 link-local。
     # 判「等于现算值」而不是判非空：换硬件后 MAC 变、地址跟着变，
     # 只判非空的话旧地址会一直留着，客户端拿到的是死地址。
-    _vdi_ll=$(run ip -6 addr show br-lan 2>/dev/null \
-              | grep 'inet6 fe80:' | grep 'proto kernel_ll' \
-              | awk '{print $2}' | cut -d/ -f1 | head -n1)
+    # 【2026-11-15 定稿】RDNSS 只判一条 ULA 地址（EUI-64 形式）。
+    # 判「等于现算值」而不是判非空：换网卡后 MAC 变、地址跟着变，
+    # 只判非空的话旧地址会一直留着，客户端拿到的是死地址。
     _vdi_ula=$(run ip -6 addr show br-lan 2>/dev/null \
                | grep 'inet6 fd' | awk '{print $2}' | cut -d/ -f1 | head -n1)
-    [ -n "$_vdi_ll" ] || return 1
-    # 【2026-11-15 改】dns 现在是含两条的 list，uci get 返回空格分隔的整串，
-    # 用 case 逐个匹配（uci get 对 list 只给整串，不能直接 = 比较）。
-    _vdi_v=$(run uci -q get dhcp.lan.dns 2>/dev/null)
-    case "$_vdi_v" in *"$_vdi_ll"*) ;; *) return 1;; esac
-    if [ -n "$_vdi_ula" ]; then
-        case "$_vdi_v" in *"$_vdi_ula"*) ;; *) return 1;; esac
-    fi
+    [ -n "$_vdi_ula" ] || return 1
+    [ "$(run uci -q get dhcp.lan.dns 2>/dev/null)" = "$_vdi_ula" ] || return 1
     # 【2026-11-15 用户定】RA 间隔与 dhcp.lan 段的四项也锁死。
     # 原来 build 会写、verify 不判：被手改后照样判通过，坏值一直留着。
     #   · ra_min/maxinterval 被改大 → 抢不过光猫（它 200-600s），Windows 的 RDNSS 会被覆盖；
@@ -725,6 +724,9 @@ build_lan_static() {
     # 为什么必须写在 lan 而不是 lan6：见 verify_lan_static 里的注释——
     # 写在 lan6 上 netifd 会报 subprefix 分配失败，且 odhcpd 会拿错前缀。
     run uci -q set network.lan.ip6assign='64'
+    # 【2026-11-15 加】显式 eui64：地址 = ULA 前缀 + MAC，永久有效，
+    # 也是 RDNSS 要通告的那个地址（不设时 netifd 给 ::1，会反复 deprecated）。
+    run uci -q set network.lan.ip6ifaceid='eui64'
     # 【2026-11-11 用户方案】写完当场 commit：让后面的 snat 节点读 network.lan.ipaddr
     # 时拿到的是落盘后的值，而不是只存在于 /tmp/.uci delta 里的内存态。
     # 真正的 reload 仍由 build_NETBASE 末尾的 flush_uci 统一做（那里还会重接容器 veth），
@@ -785,30 +787,21 @@ build_dhcp_ignore() {
     # 固件 /rom/etc/uci-defaults/15_odhcpd 本来就写 disabled，保持默认即可。
     run uci -q set dhcp.lan.ra_preference='high'
     run uci -q set dhcp.lan.dns_service='1'
-    # 【2026-11-15 用户定】RDNSS 里显式通告本机 br-lan 的 link-local 地址。
-    # 抓包实测（192.168.1.201）：只设 dns_service=1 时 odhcpd 拿接口地址兜底，
-    # 通告的会是 8c00（光猫那一段）上的地址；显式指定后 RDNSS 才稳定指向本机。
-    # 为什么不用全局地址：
-    #   · 8c01 段随运营商 PD 变，光猫一重启就失效；
-    #   · ULA 的 fd80:e247:db6e::1 已被 netifd 标 deprecated，实测 ping/nslookup 都不通；
-    #   · link-local 由 br-lan 的 MAC 生成，同一硬件永不变，RFC 8106 允许 RDNSS 带它。
-    # 动态取而不写死：换硬件 MAC 变，地址跟着变，脚本自己算得出来。
-    # 只认 proto kernel_ll：排除手工加过的和已废弃的，避免同接口多条时取错。
-    _bdi_ll=$(run ip -6 addr show br-lan 2>/dev/null \
-              | grep 'inet6 fe80:' | grep 'proto kernel_ll' \
-              | awk '{print $2}' | cut -d/ -f1 | head -n1)
-    # 【2026-11-15 加】第二条：ULA 地址，作备份。
-    # 实测（192.168.1.201）：Windows 对多路由器 RDNSS 只采纳一组，这条不会被它用；
-    # 但 Linux/Android/macOS 会累积多条，将来光猫若关掉 RDNSS，这条是兜底。
-    # 动态取，不写死：地址由 ula_prefix + ip6assign 产生，换硬件不变。
+    # 【2026-11-15 定稿】RDNSS 只发一条：ULA 地址（EUI-64 形式）。
+    # 为什么不用 link-local：实测 Windows 对 fe80:: 做 DNS 服务器时会超时
+    #   （本机 nslookup 通、Windows 侧 DNS request timed out）。
+    # 为什么用 ULA：LAB 地址由 ula_prefix + ip6assign + ip6ifaceid=eui64 产生，
+    #   valid_lft forever（实测），不随运营商 PD 变，Windows/Linux 都能用。
+    # 为什么是 EUI-64 不是 ::1：ip6ifaceid 不设时 netifd 给的是 ::1，实测反复
+    #   变 deprecated；显式写 eui64 后地址固定、永久有效。
+    # 动态取而不写死：换网卡 MAC 变，地址跟着变，脚本自己算得出来。
     _bdi_ula=$(run ip -6 addr show br-lan 2>/dev/null \
                | grep 'inet6 fd' | awk '{print $2}' | cut -d/ -f1 | head -n1)
-    if [ -n "$_bdi_ll" ]; then
+    if [ -n "$_bdi_ula" ]; then
         run uci -q delete dhcp.lan.dns
-        run uci -q add_list dhcp.lan.dns="$_bdi_ll"
-        [ -n "$_bdi_ula" ] && run uci -q add_list dhcp.lan.dns="$_bdi_ula"
+        run uci -q add_list dhcp.lan.dns="$_bdi_ula"
     else
-        log "[DHCP] 取不到 br-lan 的 link-local，跳过 DNS 通告配置"
+        log "[DHCP] 取不到 br-lan 的 ULA 地址，跳过 DNS 通告配置"
     fi
     run uci -q set dhcp.lan.ra_mininterval='30'
     run uci -q set dhcp.lan.ra_maxinterval='60'
