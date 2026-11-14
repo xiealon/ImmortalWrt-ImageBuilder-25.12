@@ -365,8 +365,10 @@ verify_lan_static() {
     return 0
 }
 
-# DHCP 让权验证：lan ignore=1（旁路由不提供 DHCP，上游光猫发）+ IPv6 RA 项清净 + 无权威 DNS
-# DHCP 让权验证：只认「不对外发地址」这个实质结果。
+# DHCP 让权验证：IPv4 不发地址（dhcpv4=disabled，让给光猫）；IPv6 由本机发 RA
+# 抢默认路由与 RDNSS（ra=server + pref=high + 30-60s），并显式通告本机 link-local。
+# 不再置 ignore=1：那会让 odhcpd 整个跳过该接口，连 RA 都不发。
+# 只认「不对外发地址」这个实质结果 + 上面那套 RA 参数是否到位。
 verify_dhcp_ignore() {
     # 【v.180.94】dhcp.lan 段不存在 = LAN 上根本没有 DHCP 池，本身即「已关闭」。
     # 这里若判未就绪，build 会把段建回来（旧行为），等于替用户重开 DHCP。
@@ -727,7 +729,9 @@ build_lan_static() {
     return 0
 }
 
-# DHCP 让权 builder：dhcp.lan.ignore=1；清 IPv6 RA 相关项；所有 dnsmasq 段删 authoritative
+# DHCP builder：删 ignore（不是置 1）；IPv4 关池（dhcpv4=disabled）；
+# IPv6 自己发 RA（ra=server / pref=high / 30-60s / RDNSS=本机 link-local）；
+# 所有 dnsmasq 段删 authoritative。
 build_dhcp_ignore() {
     # 【v.180.94】缺 dhcp.lan 段时**不建**：旁路由的 LAN 本来就不跑 DHCP，
     # 缺段是「已关闭」，不是「待配置」。旧行为是 add 一个段再 rename 成 lan 并置
