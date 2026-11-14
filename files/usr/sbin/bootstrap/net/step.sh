@@ -350,7 +350,6 @@ verify_lan_static() {
     # 结果 local-address 为空、br-lan 拿不到前缀，odhcpd 只能退回去用上游 SLAAC
     # 那一段（光猫的 8c00），分配出与光猫同段的地址（真机 2026-11-14 踩到）。
     [ "$(run uci -q get network.lan.ip6assign 2>/dev/null)" = "64" ] || return 1
-    [ "$(run uci -q get network.lan.ip6hint 2>/dev/null)" = "0" ] || return 1
     return 0
 }
 
@@ -673,13 +672,15 @@ build_lan_static() {
     run uci -q set network.lan6.norelease='1'
     run uci -q set network.lan6.sendclientid='auto'
     run uci -q set network.lan6.peerdns='0'
-    # ---- lan：IPv6 前缀分配（用户 2026-11-14 定：长度 64、hint 0）----
+    # ---- lan：IPv6 前缀分配（用户 2026-11-14 定：长度 64）----
     # ip6assign='64'：从 lan6 向光猫要到的 PD 池里切一段 /64 给 lan
-    # ip6hint='0'   ：取池里第 0 个子网（光猫只给 1 个 /64 时即唯一那段）
+    # 【2026-11-14 用户定】不写 ip6hint：让 netifd 自己挑空位。
+    # 原因：hint 是「从多段里选第几段」用的，本机只有一段 /64 时它不参与决策；
+    # 而一旦运营商改发 /56，hint=0 会指向 8c00::/64 —— 那正是光猫自己在用的段
+    # （lan6 的 SLAAC 地址就落在 8c00），会撞段。不写则 netifd 自动避开已占用的。
     # 为什么必须写在 lan 而不是 lan6：见 verify_lan_static 里的注释——
     # 写在 lan6 上 netifd 会报 subprefix 分配失败，且 odhcpd 会拿错前缀。
     run uci -q set network.lan.ip6assign='64'
-    run uci -q set network.lan.ip6hint='0'
     # 【2026-11-11 用户方案】写完当场 commit：让后面的 snat 节点读 network.lan.ipaddr
     # 时拿到的是落盘后的值，而不是只存在于 /tmp/.uci delta 里的内存态。
     # 真正的 reload 仍由 build_NETBASE 末尾的 flush_uci 统一做（那里还会重接容器 veth），
