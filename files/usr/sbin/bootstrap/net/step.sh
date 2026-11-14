@@ -371,6 +371,14 @@ verify_dhcp_ignore() {
     [ "$(run uci -q get dhcp.lan.ra 2>/dev/null)" = "server" ] || return 1
     [ "$(run uci -q get dhcp.lan.ra_preference 2>/dev/null)" = "high" ] || return 1
     [ "$(run uci -q get dhcp.lan.dns_service 2>/dev/null)" = "1" ] || return 1
+    # 【2026-11-15 加】RDNSS 必须指向本机 br-lan 当前的 link-local。
+    # 判「等于现算值」而不是判非空：换硬件后 MAC 变、地址跟着变，
+    # 只判非空的话旧地址会一直留着，客户端拿到的是死地址。
+    _vdi_ll=$(run ip -6 addr show br-lan 2>/dev/null \
+              | grep 'inet6 fe80:' | grep 'proto kernel_ll' \
+              | awk '{print $2}' | cut -d/ -f1 | head -n1)
+    [ -n "$_vdi_ll" ] || return 1
+    [ "$(run uci -q get dhcp.lan.dns 2>/dev/null)" = "$_vdi_ll" ] || return 1
     for _dm in $(run uci show dhcp 2>/dev/null | grep -E '=dnsmasq$' | cut -d. -f2 | cut -d= -f1); do
         [ -z "$(run uci -q get "dhcp.$_dm.authoritative" 2>/dev/null)" ] || return 1
     done
@@ -733,6 +741,24 @@ build_dhcp_ignore() {
     # 固件 /rom/etc/uci-defaults/15_odhcpd 本来就写 disabled，保持默认即可。
     run uci -q set dhcp.lan.ra_preference='high'
     run uci -q set dhcp.lan.dns_service='1'
+    # 【2026-11-15 用户定】RDNSS 里显式通告本机 br-lan 的 link-local 地址。
+    # 抓包实测（192.168.1.201）：只设 dns_service=1 时 odhcpd 拿接口地址兜底，
+    # 通告的会是 8c00（光猫那一段）上的地址；显式指定后 RDNSS 才稳定指向本机。
+    # 为什么不用全局地址：
+    #   · 8c01 段随运营商 PD 变，光猫一重启就失效；
+    #   · ULA 的 fd80:e247:db6e::1 已被 netifd 标 deprecated，实测 ping/nslookup 都不通；
+    #   · link-local 由 br-lan 的 MAC 生成，同一硬件永不变，RFC 8106 允许 RDNSS 带它。
+    # 动态取而不写死：换硬件 MAC 变，地址跟着变，脚本自己算得出来。
+    # 只认 proto kernel_ll：排除手工加过的和已废弃的，避免同接口多条时取错。
+    _bdi_ll=$(run ip -6 addr show br-lan 2>/dev/null \
+              | grep 'inet6 fe80:' | grep 'proto kernel_ll' \
+              | awk '{print $2}' | cut -d/ -f1 | head -n1)
+    if [ -n "$_bdi_ll" ]; then
+        run uci -q delete dhcp.lan.dns
+        run uci -q add_list dhcp.lan.dns="$_bdi_ll"
+    else
+        log "[DHCP] 取不到 br-lan 的 link-local，跳过 DNS 通告配置"
+    fi
     run uci -q set dhcp.lan.ra_mininterval='30'
     run uci -q set dhcp.lan.ra_maxinterval='60'
     # 所有 dnsmasq 段删掉 authoritative：旁路由不是权威 DHCP，避免抢答
