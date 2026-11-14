@@ -344,14 +344,15 @@ verify_dhcp_ignore() {
         _vdi_has=1
     fi
     [ "$_vdi_has" = "1" ] || return 0
-    [ "$(run uci -q get dhcp.lan.ignore 2>/dev/null)" = "1" ] || return 1
-    # 【v.108.24】删除项也要验。build 除了置 ignore=1，还删了 ra/dhcpv6/ndp/
-    # ra_management 以及所有 dnsmasq 段的 authoritative。原来只验 ignore，
-    # 于是「ignore 对、但 ra 又被 LuCI 打开」这种半吊子状态会被判成已就绪 ——
-    # 旁路由一边说不发地址、一边还在发 RA，主机拿到 IPv6 却上不了网。
-    for _k in ra dhcpv6 ndp ra_management; do
-        [ -z "$(run uci -q get "dhcp.lan.$_k" 2>/dev/null)" ] || return 1
-    done
+    # 【2026-11-14 改】旁路由改为「自己发 RA 抢默认路由/DNS」，不再是「关 RA」。
+    # 验的是 build 写进去的那套值，任一项不符就判需修复。
+    [ -z "$(run uci -q get dhcp.lan.ignore 2>/dev/null)" ] || return 1
+    [ "$(run uci -q get dhcp.lan.dhcpv4 2>/dev/null)" = "disabled" ] || return 1
+    [ "$(run uci -q get dhcp.lan.ra 2>/dev/null)" = "server" ] || return 1
+    [ "$(run uci -q get dhcp.lan.ra_preference 2>/dev/null)" = "high" ] || return 1
+    [ "$(run uci -q get dhcp.lan.dns_service 2>/dev/null)" = "1" ] || return 1
+    [ "$(run uci -q get dhcp.lan.ra_management 2>/dev/null)" = "0" ] || return 1
+    [ "$(run uci -q get dhcp.lan.ra_flags 2>/dev/null)" = "none" ] || return 1
     for _dm in $(run uci show dhcp 2>/dev/null | grep -E '=dnsmasq$' | cut -d. -f2 | cut -d= -f1); do
         [ -z "$(run uci -q get "dhcp.$_dm.authoritative" 2>/dev/null)" ] || return 1
     done
@@ -652,11 +653,24 @@ build_dhcp_ignore() {
         log "[DHCP] 无 dhcp.lan 段（LAN 不提供 DHCP），跳过让权"
         return 0
     fi
-    run uci -q set dhcp.lan.ignore='1'
-    run uci -q delete dhcp.lan.ra 2>/dev/null
-    run uci -q delete dhcp.lan.dhcpv6 2>/dev/null
-    run uci -q delete dhcp.lan.ndp 2>/dev/null
-    run uci -q delete dhcp.lan.ra_management 2>/dev/null
+    # 【2026-11-14 改】旁路由不再「关 RA」，改成「自己发 RA 抢默认路由和 DNS」
+    # 原设计是把 DHCP/RA 全部让给光猫（ignore=1 + 删 ra/dhcpv6/ndp/ra_management）。
+    # 现在改成：IPv4 DHCP 仍然不发（dhcpv4=disabled），但 IPv6 RA 由本机发，
+    # 让设备的 IPv6 默认路由和 DNS 都指向本机（smartdns），光猫只做兜底。
+    # 为什么必须自己发 RA：
+    #   1) ra_preference=high  → Windows 收到 metric 16，光猫 medium 是 256
+    #   2) interval=30-60s     → 比光猫（200-600s）发得勤；Windows 只保留最后到的 RDNSS
+    #   3) ra_management=0 + ra_flags=none → 显式写死 M=0 O=0
+    #      （odhcpd 默认 other-config 会让 O=1，设备会发无用的 DHCPv6 Information-request）
+    run uci -q delete dhcp.lan.ignore
+    run uci -q set dhcp.lan.dhcpv4='disabled'
+    run uci -q set dhcp.lan.ra='server'
+    run uci -q set dhcp.lan.ra_preference='high'
+    run uci -q set dhcp.lan.dns_service='1'
+    run uci -q set dhcp.lan.ra_mininterval='30'
+    run uci -q set dhcp.lan.ra_maxinterval='60'
+    run uci -q set dhcp.lan.ra_management='0'
+    run uci -q set dhcp.lan.ra_flags='none'
     # 所有 dnsmasq 段删掉 authoritative：旁路由不是权威 DHCP，避免抢答
     for _dm in $(run uci show dhcp 2>/dev/null | grep -E '=dnsmasq$' | cut -d. -f2 | cut -d= -f1); do
         run uci -q delete "dhcp.$_dm.authoritative" 2>/dev/null
@@ -667,7 +681,7 @@ build_dhcp_ignore() {
     # 所以让位跟着 smartdns 的接管结果走（port=53 + auto_set_dnsmasq=1 时，
     # 由 smartdns 自己的 init 让 dnsmasq 退出 53，见 pkg-restore-smartdns.sh 文件头）：
     # 能接管了才放手，接管不了就继续让 dnsmasq 顶着。
-    log "[DHCP] 已让权：lan.ignore=1，并清除 RA/authoritative"
+    log "[DHCP] IPv6 RA 已接管：ra=server pref=high dns_service=1 interval=30-60s flags=none（IPv4 DHCP 仍关闭）"
     return 0
 }
 
