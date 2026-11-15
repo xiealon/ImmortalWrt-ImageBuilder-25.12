@@ -403,29 +403,13 @@ verify_dhcp_ignore() {
     [ "$(run uci -q get dhcp.lan.ra 2>/dev/null)" = "server" ] || return 1
     [ "$(run uci -q get dhcp.lan.ra_preference 2>/dev/null)" = "high" ] || return 1
     [ "$(run uci -q get dhcp.lan.dns_service 2>/dev/null)" = "1" ] || return 1
-    # 【2026-11-15 加】RDNSS 必须指向本机 br-lan 当前的 link-local。
-    # 判「等于现算值」而不是判非空：换硬件后 MAC 变、地址跟着变，
-    # 只判非空的话旧地址会一直留着，客户端拿到的是死地址。
-    # 【2026-11-15 定稿】RDNSS 只判一条 ULA 地址（EUI-64 形式）。
-    # 判「等于现算值」而不是判非空：换网卡后 MAC 变、地址跟着变，
-    # 只判非空的话旧地址会一直留着，客户端拿到的是死地址。
-    _vdi_ula=$(run ip -6 addr show br-lan 2>/dev/null \
-               | grep 'inet6 fd' | awk '{print $2}' | cut -d/ -f1 | head -n1)
-    _vdi_ll=$(run ip -6 addr show br-lan 2>/dev/null \
-              | grep 'inet6 fe80:' | grep 'proto kernel_ll' \
-              | awk '{print $2}' | cut -d/ -f1 | head -n1)
-    [ -n "$_vdi_ula" ] || return 1
-    # 【2026-11-15 改】dns 现在是含两条的 list，uci get 返回空格分隔的整串，
-    # 用 case 逐个匹配（uci get 对 list 只给整串，不能直接 = 比较）。
-    _vdi_v=$(run uci -q get dhcp.lan.dns 2>/dev/null)
-    case "$_vdi_v" in *"$_vdi_ula"*) ;; *) return 1;; esac
-    if [ -n "$_vdi_ll" ]; then
-        # 【2026-11-15 加】连顺序一起判：list 整串必须以 ULA 开头（link-local 必须排后面）。
-        # 实测 link-local 做 DNS 时本机答不了（bind EINVAL + 回包源地址不对），
-        # 排第一会让新接入的客户端拿到一个查不通的 DNS。
-        # uci get 返回的就是落盘顺序，用不带前导 * 的通配即可，不用拆词。
-        case "$_vdi_v" in "$_vdi_ula"*) ;; *) return 1;; esac
-    fi
+    # 【2026-11-15 用户定】dns 留空 = 交给 odhcpd 自选接口地址，这里只锁一条底线：
+    # 不能出现 link-local —— 实测它收得下查询但答不了（smartdns 绑不上 fe80::，
+    # 回包源地址被选成公网段，客户端丢弃），写进来等于给客户端一个查不通的 DNS。
+    # 手动指定 ULA / 公网地址一律放行，不做判断（dns_service 已在上面判过）。
+    case "$(run uci -q get dhcp.lan.dns 2>/dev/null)" in
+        *fe80:*) return 1 ;;
+    esac
     # 【2026-11-15 用户定】RA 间隔与 dhcp.lan 段的四项也锁死。
     # 原来 build 会写、verify 不判：被手改后照样判通过，坏值一直留着。
     #   · ra_min/maxinterval 被改大 → 抢不过光猫（它 200-600s），Windows 的 RDNSS 会被覆盖；
@@ -854,35 +838,22 @@ build_dhcp_ignore() {
     # 固件 /rom/etc/uci-defaults/15_odhcpd 本来就写 disabled，保持默认即可。
     run uci -q set dhcp.lan.ra_preference='high'
     run uci -q set dhcp.lan.dns_service='1'
-    # 【2026-11-15 定稿】RDNSS 发两条，ULA 在前、link-local 在后。
-    # 为什么 ULA 排第一（2026-11-15 09:59 实战定）：link-local 做 DNS 在本机上
-    #   **根本答不了**，实测三条：
-    #     ① smartdns 绑不上 link-local：bind [fe80::...]:53 → EINVAL（缺 scope id），
-    #        smartdns 不支持 %iface 写法（bind ip address invalid）；
-    #     ② 就算用通配 :::53 收下查询，回包源地址由路由选成公网段（ip -6 route get
-    #        … from fe80:: → src 240e:…），客户端拿到的回复源 ≠ 查询目标，直接丢弃；
-    #     ③ Windows 侧实测 nslookup fe80::…%14 一直 timeout，pktmon 只见 Tx 不见 Rx。
-    #   所以 link-local 只能当「备选第二条」，绝不能排第一。
-    # 为什么还要它：Linux/其它客户端在 link-local 上查时（源也是 fe80::）能通，
-    #   留着不碍事；Windows 前面的 ULA 能答就不会问它。
-    # 为什么用 ULA 且是 EUI-64：ula_prefix + ip6assign + ip6ifaceid=eui64 产生，
-    #   不随运营商 PD 变；不设 eui64 时 netifd 给 ::1，实测反复 deprecated。
-    # 动态取而不写死：换网卡 MAC 变，地址跟着变，脚本自己算得出来。
-    _bdi_ula=$(run ip -6 addr show br-lan 2>/dev/null \
-               | grep 'inet6 fd' | awk '{print $2}' | cut -d/ -f1 | head -n1)
-    # 【2026-11-15 加】第二条：link-local，放在 ULA 后面作备选。
-    # 见上面那段实测：Windows 用它做 DNS 会超时，但 Linux/Android 在 fe80 上查时能通。
-    # 只认 proto kernel_ll：排除手工加过的和已废弃的，避免同接口多条时取错。
-    _bdi_ll=$(run ip -6 addr show br-lan 2>/dev/null \
-              | grep 'inet6 fe80:' | grep 'proto kernel_ll' \
-              | awk '{print $2}' | cut -d/ -f1 | head -n1)
-    if [ -n "$_bdi_ula" ]; then
-        run uci -q delete dhcp.lan.dns
-        run uci -q add_list dhcp.lan.dns="$_bdi_ula"
-        [ -n "$_bdi_ll" ] && run uci -q add_list dhcp.lan.dns="$_bdi_ll"
-    else
-        log "[DHCP] 取不到 br-lan 的 ULA 地址，跳过 DNS 通告配置"
-    fi
+    # 【2026-11-15 用户定】dhcp.lan.dns 保持空，不写死任何地址 —— 交给 odhcpd 自己挑。
+    # odhcpd 自带兜底（router.c 的 RDNSS 段 + odhcpd.c:364 odhcpd_get_interface_dns_addr6）：
+    #   dns 列表为空时从接口地址里选一条：① 跳过 valid 已过期的；② preferred 优先于
+    #   deprecated；③ ULA 优先于全局地址（运营商 PD 段）；④ 同档里 preferred_lifetime
+    #   最长的优先；⑤ 一条可用的都没有才退回 link-local。
+    # 为什么这么做：地址跟着接口走，PD 换了自动换，脚本不用算地址、也不用维护两份。
+    # 为什么不写死 link-local：实测它能收不能答 —— smartdns 绑不上 fe80::（EINVAL，
+    #   缺 scope id，且不支持 %iface 写法）；就算用通配 :::53 收下查询，回包源地址也会
+    #   被路由选成公网段（ip -6 route get … from fe80:: → src 240e:…），客户端拿到
+    #   「回复源 ≠ 查询目标」直接丢弃（Windows 侧 nslookup 一直 timeout）。
+    # 为什么不写死 ULA：ULA 被 rfc9096 标 stale 时 preferred=0，写死等于通告一条快过期
+    #   的地址；交给 odhcpd 挑，它会自己把 deprecated 的排到后面。
+    # 只清掉 link-local：那一类留着只会让客户端超时，其余（手动指定的）一律不动。
+    case "$(run uci -q get dhcp.lan.dns 2>/dev/null)" in
+        *fe80:*) run uci -q delete dhcp.lan.dns ;;
+    esac
     run uci -q set dhcp.lan.ra_mininterval='30'
     run uci -q set dhcp.lan.ra_maxinterval='60'
     # 所有 dnsmasq 段删掉 authoritative：旁路由不是权威 DHCP，避免抢答
