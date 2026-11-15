@@ -402,7 +402,12 @@ verify_dhcp_ignore() {
     [ "$(run uci -q get dhcp.lan.dhcpv4 2>/dev/null)" = "disabled" ] || return 1
     [ "$(run uci -q get dhcp.lan.ra 2>/dev/null)" = "server" ] || return 1
     [ "$(run uci -q get dhcp.lan.ra_preference 2>/dev/null)" = "high" ] || return 1
-    [ "$(run uci -q get dhcp.lan.dns_service 2>/dev/null)" = "1" ] || return 1
+    # 【2026-11-15 用户定】dns_service 只要求「不是显式 0」：删掉（空）和 1 都算对。
+    # odhcpd 默认 true，删掉等价于开；写成 0 才是真的关掉 RDNSS。
+    case "$(run uci -q get dhcp.lan.dns_service 2>/dev/null)" in
+        ""|1) ;;
+        *) return 1 ;;
+    esac
     # 【2026-11-15 用户定】dns 留空 = 交给 odhcpd 自选接口地址，这里只锁一条底线：
     # 不能出现 link-local —— 实测它收得下查询但答不了（smartdns 绑不上 fe80::，
     # 回包源地址被选成公网段，客户端丢弃），写进来等于给客户端一个查不通的 DNS。
@@ -837,7 +842,12 @@ build_dhcp_ignore() {
     # managed-config，它会真去分配地址，可能又抢到光猫的 8c00 段。
     # 固件 /rom/etc/uci-defaults/15_odhcpd 本来就写 disabled，保持默认即可。
     run uci -q set dhcp.lan.ra_preference='high'
-    run uci -q set dhcp.lan.dns_service='1'
+    # 【2026-11-15 用户定】dns_service 不写 1，直接删掉。
+    # odhcpd 的 clean_interface() 里 dns_service 默认就是 true（源码 config.c:331），
+    # 删掉照样发 RDNSS —— 实测：dns 空 + dns_service 删掉，RA 里带
+    #   RDNSS=240e:381:8d5f:8c00:327b:acff:fef9:2d2f（odhcpd 自己挑的接口地址）。
+    # 少一个配置项，就少一个被手改后要判的项。
+    run uci -q delete dhcp.lan.dns_service
     # 【2026-11-15 用户定】dhcp.lan.dns 保持空，不写死任何地址 —— 交给 odhcpd 自己挑。
     # odhcpd 自带兜底（router.c 的 RDNSS 段 + odhcpd.c:364 odhcpd_get_interface_dns_addr6）：
     #   dns 列表为空时从接口地址里选一条：① 跳过 valid 已过期的；② preferred 优先于
