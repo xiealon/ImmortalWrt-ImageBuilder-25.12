@@ -404,8 +404,10 @@ verify_dhcp_ignore() {
     [ "$(run uci -q get dhcp.lan.ra_preference 2>/dev/null)" = "high" ] || return 1
     # 【2026-11-15 用户定】dns_service 必须是 1（不删除、显式写死）。
     [ "$(run uci -q get dhcp.lan.dns_service 2>/dev/null)" = "1" ] || return 1
-    # dns 不判：留空 = 让 odhcpd 按接口当前状态自己挑（ULA 活着发 ULA，掉了就换运营商
-    # 地址）。写死任何值都会在地址状态变化时变成死地址，所以这里不做判断。
+    # 【2026-11-15 用户定】dns 必须为空：空了 odhcpd 才会按接口当前状态自己挑
+    # （ULA 活着发 ULA，掉了就换运营商地址）。写死任何值都会在地址状态变化时变成
+    # 死地址，所以非空即判需修复，由 build 删掉。
+    [ -z "$(run uci -q get dhcp.lan.dns 2>/dev/null)" ] || return 1
     # 【2026-11-15 用户定】RA 间隔与 dhcp.lan 段的四项也锁死。
     # 原来 build 会写、verify 不判：被手改后照样判通过，坏值一直留着。
     #   · ra_min/maxinterval 被改大 → 抢不过光猫（它 200-600s），Windows 的 RDNSS 会被覆盖；
@@ -846,6 +848,8 @@ build_dhcp_ignore() {
     #   （实测 10:12 发的是 240e:381:8d5f:8c00:327b:acff:fef9:2d2f）—— 自我恢复。
     # 为什么不写 link-local：实测它能收不能答（抓包只有请求没有回包；smartdns 绑
     #   fe80:: 直接 EINVAL，换 dnsmasq 一样超时）。odhcpd 只在没有任何其它地址时才退它。
+    # 不再「只在某条件下删」：无条件删，配合 verify 判「必须为空」，手填的地址会被
+    # 下一轮 --fix 清掉 —— 否则一个手工值会永久生效，RDNSS 又变回写死。
     run uci -q delete dhcp.lan.dns
     run uci -q set dhcp.lan.ra_mininterval='30'
     run uci -q set dhcp.lan.ra_maxinterval='60'
