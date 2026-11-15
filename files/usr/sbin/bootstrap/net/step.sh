@@ -834,22 +834,20 @@ build_dhcp_ignore() {
     # managed-config，它会真去分配地址，可能又抢到光猫的 8c00 段。
     # 固件 /rom/etc/uci-defaults/15_odhcpd 本来就写 disabled，保持默认即可。
     run uci -q set dhcp.lan.ra_preference='high'
-    # 【2026-11-15 用户定】dns_service 不写 1，直接删掉。
-    # odhcpd 的 clean_interface() 里 dns_service 默认就是 true（源码 config.c:331），
-    # 删掉照样发 RDNSS —— 实测：dns 空 + dns_service 删掉，RA 里带
-    #   RDNSS=240e:381:8d5f:8c00:327b:acff:fef9:2d2f（odhcpd 自己挑的接口地址）。
-    # 少一个配置项，就少一个被手改后要判的项。
-    run uci -q delete dhcp.lan.dns_service
+    # 【2026-11-15 用户定】dns_service / dns / ra_dns 三个字段：脚本一个都不写、不删。
+    # 全用 odhcpd 默认值（clean_interface() 里 dns_service=true、ra_dns=true，
+    # 源码 config.c:331/341），RDNSS 的地址由 odhcpd 从接口地址里自己挑。
     # 【2026-11-15 用户定】dhcp.lan.dns 保持空，不写死任何地址 —— 交给 odhcpd 自己挑。
     # odhcpd 自带兜底（router.c 的 RDNSS 段 + odhcpd.c:364 odhcpd_get_interface_dns_addr6）：
     #   dns 列表为空时从接口地址里选一条：① 跳过 valid 已过期的；② preferred 优先于
     #   deprecated；③ ULA 优先于全局地址（运营商 PD 段）；④ 同档里 preferred_lifetime
     #   最长的优先；⑤ 一条可用的都没有才退回 link-local。
     # 为什么这么做：地址跟着接口走，PD 换了自动换，脚本不用算地址、也不用维护两份。
-    # 为什么不写死 link-local：实测它能收不能答 —— smartdns 绑不上 fe80::（EINVAL，
-    #   缺 scope id，且不支持 %iface 写法）；就算用通配 :::53 收下查询，回包源地址也会
-    #   被路由选成公网段（ip -6 route get … from fe80:: → src 240e:…），客户端拿到
-    #   「回复源 ≠ 查询目标」直接丢弃（Windows 侧 nslookup 一直 timeout）。
+    # 为什么不写死 link-local：实测它能收不能答 —— 抓包看得到查询到了路由器
+    #   （fe80::客户端.5xxxx > fe80::327b:…:2d2f.53），但**一个回包都没有**；
+    #   smartdns 绑 fe80:: 直接 EINVAL（缺 scope id，且不支持 %iface 写法）。
+    #   【10:29 更正】之前说「回包源地址被选成公网段」是错的 —— 那是查公网目的地时
+    #   的选源结果；LL→LL 这种场景下压根没产生回包，谈不上源地址。
     # 为什么不写死 ULA：ULA 被 rfc9096 标 stale 时 preferred=0，写死等于通告一条快过期
     #   的地址；交给 odhcpd 挑，它会自己把 deprecated 的排到后面。
     # 【2026-11-15 用户定】dns 一个字都不写：不 delete、不 add、不清 link-local。
