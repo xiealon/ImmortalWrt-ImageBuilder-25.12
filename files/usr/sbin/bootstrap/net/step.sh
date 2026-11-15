@@ -373,13 +373,10 @@ verify_lan_static() {
     # 【2026-11-15 加】ip6ifaceid 必须显式 eui64。
     # 不设时 netifd 给的接口地址是 ::1，实测反复变 deprecated；
     # 显式 eui64 后 ULA 地址 = 前缀 + MAC，valid_lft forever。
-    # RDNSS 通告的就是这个地址，所以要一起锁。
+    # （RDNSS 现在由 odhcpd 自选，不再绑这条地址，但接口地址本身仍固定成 EUI-64。）
     [ "$(run uci -q get network.lan.ip6ifaceid 2>/dev/null)" = "eui64" ] || return 1
-    # 【2026-11-15 加】ULA 地址必须真的落在 br-lan 上，不能只看 uci。
-    # 真机现场：netifd 的 assignment 里有 fd80 那一项、local-address 也有值，
-    # 但内核接口上没有 —— uci 全对、ip addr 看不到。这种状态只有判运行时才发现。
-    # 判不过 → 走 build → flush 里 network reload 重新下发，等价于 ifup 一次。
-    run ip -6 addr show br-lan 2>/dev/null | grep -q 'inet6 fd' || return 1
+    # 【2026-11-15 用户定】不再判「ULA 是否真的落在 br-lan 上」。
+    # ip6assign + ip6ifaceid 设好，netifd 自己就会生成地址，不需要额外判定盯着它。
     return 0
 }
 
@@ -764,28 +761,9 @@ build_lan_static() {
         return 1
     fi
     log "[LAN] 已提交：lan 静态地址 $1/$2 网关 $3 DNS $4 + lan6（dhcpv6, peerdns=0）"
-    # 【2026-11-15 加】commit 之后确认 ULA 地址真的落到了接口上。
-    # 真机实测（192.168.1.201，2026-11-15 07:05）：
-    #   uci 全对、netifd 的 assignment 里也有 fd80 那一项、local-address 也有值，
-    #   但 `ip -6 addr show br-lan` 看不到地址 —— 只有判运行时才发现。
-    # 光靠 flush_uci 里的 network reload 修不了这个状态（实测 reload 后仍是空），
-    # 必须 ifup（= down + up，强制重建），实测 3 秒内地址就回来。
-    # 代价：这一下会断网 1~3 秒，只在「地址确实丢了」时才发生。
-    if ! run ip -6 addr show br-lan 2>/dev/null | grep -q 'inet6 fd'; then
-        log "[LAN] ULA 地址未下发到 br-lan，执行 ifup lan 强制重建"
-        ( sleep 1; ifup lan >/dev/null 2>&1 ) &
-        _luw_n=0
-        while [ "$_luw_n" -lt 20 ]; do
-            sleep 1
-            _luw_n=$((_luw_n + 1))
-            run ip -6 addr show br-lan 2>/dev/null | grep -q 'inet6 fd' && break
-        done
-        if run ip -6 addr show br-lan 2>/dev/null | grep -q 'inet6 fd'; then
-            log "[LAN] ifup 后 ULA 地址已恢复（等待 ${_luw_n}s）"
-        else
-            log "[LAN] ifup 后 ULA 地址仍未恢复（留待探针下轮再试）"
-        fi
-    fi
+    # 【2026-11-15 用户定】不再做「ULA 没下发就 ifup」的自愈。
+    # ip6assign + ip6ifaceid 设好，netifd 自己会生成地址；额外盯着它只会带来副作用
+    # ——ifup 本身会触发 rfc9096 前缀抖动，反而把本来好的 ULA 标成 stale。
     return 0
 }
 
