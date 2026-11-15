@@ -402,8 +402,9 @@ verify_dhcp_ignore() {
     [ "$(run uci -q get dhcp.lan.dhcpv4 2>/dev/null)" = "disabled" ] || return 1
     [ "$(run uci -q get dhcp.lan.ra 2>/dev/null)" = "server" ] || return 1
     [ "$(run uci -q get dhcp.lan.ra_preference 2>/dev/null)" = "high" ] || return 1
-    # 【2026-11-15 用户定】dns_service 必须是 1（不删除、显式写死）。
-    [ "$(run uci -q get dhcp.lan.dns_service 2>/dev/null)" = "1" ] || return 1
+    # 【2026-11-15 用户定】dns_service 必须为空（删掉），靠 odhcpd 默认值 = true。
+    # 写成显式的 0 才是真的关掉 RDNSS —— 那属于手改，判失败让 build 删掉。
+    [ -z "$(run uci -q get dhcp.lan.dns_service 2>/dev/null)" ] || return 1
     # 【2026-11-15 用户定】dns 必须为空：空了 odhcpd 才会按接口当前状态自己挑
     # （ULA 活着发 ULA，掉了就换运营商地址）。写死任何值都会在地址状态变化时变成
     # 死地址，所以非空即判需修复，由 build 删掉。
@@ -835,10 +836,10 @@ build_dhcp_ignore() {
     # managed-config，它会真去分配地址，可能又抢到光猫的 8c00 段。
     # 固件 /rom/etc/uci-defaults/15_odhcpd 本来就写 disabled，保持默认即可。
     run uci -q set dhcp.lan.ra_preference='high'
-    # dns_service 显式写 1（**不删除**）：与路由器上跑的那版保持一致。
-    # odhcpd 源码里它默认就是 true，写不写都能发 RDNSS；写 1 是为了让配置自解释，
-    # 也避免老版本固件（默认值不同）上莫名其妙不发。
-    run uci -q set dhcp.lan.dns_service='1'
+    # 【2026-11-15 用户定】dns_service 也删掉，不写 1。
+    # odhcpd 源码 clean_interface() 里它默认就是 true（config.c:331），删掉照样发 RDNSS；
+    # 留个显式值只会多一个会被手改的项。实测：删掉后 RA 里 RDNSS 正常出现。
+    run uci -q delete dhcp.lan.dns_service
     # 【2026-11-15 用户定】dhcp.lan.dns 删空，不写任何地址 —— 让 odhcpd 自己挑。
     # 为什么不写死 ULA：ULA 是本机静态派生的，没有上游给它续命；实测一次 ifup 触发
     #   rfc9096 判定后它被标 stale → netifd 降为 deprecated（preferred 0）→ 寿命倒计时
