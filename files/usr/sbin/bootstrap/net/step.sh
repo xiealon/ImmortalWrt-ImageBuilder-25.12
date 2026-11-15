@@ -864,7 +864,7 @@ build_dhcp_ignore() {
     # 所以让位跟着 smartdns 的接管结果走（port=53 + auto_set_dnsmasq=1 时，
     # 由 smartdns 自己的 init 让 dnsmasq 退出 53，见 pkg-restore-smartdns.sh 文件头）：
     # 能接管了才放手，接管不了就继续让 dnsmasq 顶着。
-    log "[DHCP] IPv6 RA 已接管：ra=server pref=high dns_service=1 interval=30-60s（IPv4 DHCP 仍关闭）"
+    log "[DHCP] IPv6 RA 已接管：ra=server pref=high interval=30-60s RDNSS 由 odhcpd 自选（IPv4 DHCP 仍关闭）"
     return 0
 }
 
