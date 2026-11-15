@@ -402,19 +402,11 @@ verify_dhcp_ignore() {
     [ "$(run uci -q get dhcp.lan.dhcpv4 2>/dev/null)" = "disabled" ] || return 1
     [ "$(run uci -q get dhcp.lan.ra 2>/dev/null)" = "server" ] || return 1
     [ "$(run uci -q get dhcp.lan.ra_preference 2>/dev/null)" = "high" ] || return 1
-    # 【2026-11-15 用户定】dns_service 只要求「不是显式 0」：删掉（空）和 1 都算对。
-    # odhcpd 默认 true，删掉等价于开；写成 0 才是真的关掉 RDNSS。
-    case "$(run uci -q get dhcp.lan.dns_service 2>/dev/null)" in
-        ""|1) ;;
-        *) return 1 ;;
-    esac
-    # 【2026-11-15 用户定】dns 留空 = 交给 odhcpd 自选接口地址，这里只锁一条底线：
-    # 不能出现 link-local —— 实测它收得下查询但答不了（smartdns 绑不上 fe80::，
-    # 回包源地址被选成公网段，客户端丢弃），写进来等于给客户端一个查不通的 DNS。
-    # 手动指定 ULA / 公网地址一律放行，不做判断（dns_service 已在上面判过）。
-    case "$(run uci -q get dhcp.lan.dns 2>/dev/null)" in
-        *fe80:*) return 1 ;;
-    esac
+    # 【2026-11-15 用户定】dns / dns_service / ra_dns 一个字都不判：RDNSS 发不发、
+    # 发哪条，全部交给 odhcpd 自己判断（它的兜底见 build_dhcp_ignore 的注释）。
+    # 为什么不锁：这条地址本来就随接口状态变 —— ULA 被 rfc9096 标 stale 时它自动
+    # 换成公网段那条，ifup 把 ULA 拉回来成 preferred 后又换回去（10:12 / 10:19 两次
+    # 抓包实测）。脚本锁哪个值都会和实际打架，不如让它自己挑。
     # 【2026-11-15 用户定】RA 间隔与 dhcp.lan 段的四项也锁死。
     # 原来 build 会写、verify 不判：被手改后照样判通过，坏值一直留着。
     #   · ra_min/maxinterval 被改大 → 抢不过光猫（它 200-600s），Windows 的 RDNSS 会被覆盖；
@@ -860,10 +852,8 @@ build_dhcp_ignore() {
     #   「回复源 ≠ 查询目标」直接丢弃（Windows 侧 nslookup 一直 timeout）。
     # 为什么不写死 ULA：ULA 被 rfc9096 标 stale 时 preferred=0，写死等于通告一条快过期
     #   的地址；交给 odhcpd 挑，它会自己把 deprecated 的排到后面。
-    # 只清掉 link-local：那一类留着只会让客户端超时，其余（手动指定的）一律不动。
-    case "$(run uci -q get dhcp.lan.dns 2>/dev/null)" in
-        *fe80:*) run uci -q delete dhcp.lan.dns ;;
-    esac
+    # 【2026-11-15 用户定】dns 一个字都不写：不 delete、不 add、不清 link-local。
+    # RDNSS 发不发、发哪条全交给 odhcpd 自己判断，脚本只管「别把它写死」。
     run uci -q set dhcp.lan.ra_mininterval='30'
     run uci -q set dhcp.lan.ra_maxinterval='60'
     # 所有 dnsmasq 段删掉 authoritative：旁路由不是权威 DHCP，避免抢答
@@ -876,7 +866,7 @@ build_dhcp_ignore() {
     # 所以让位跟着 smartdns 的接管结果走（port=53 + auto_set_dnsmasq=1 时，
     # 由 smartdns 自己的 init 让 dnsmasq 退出 53，见 pkg-restore-smartdns.sh 文件头）：
     # 能接管了才放手，接管不了就继续让 dnsmasq 顶着。
-    log "[DHCP] IPv6 RA 已接管：ra=server pref=high dns_service=1 interval=30-60s（IPv4 DHCP 仍关闭）"
+    log "[DHCP] IPv6 RA 已接管：ra=server pref=high interval=30-60s RDNSS 由 odhcpd 自选（IPv4 DHCP 仍关闭）"
     return 0
 }
 
