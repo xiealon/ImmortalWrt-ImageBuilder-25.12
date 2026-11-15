@@ -420,7 +420,9 @@ verify_dhcp_ignore() {
     _vdi_v=$(run uci -q get dhcp.lan.dns 2>/dev/null)
     case "$_vdi_v" in *"$_vdi_ula"*) ;; *) return 1;; esac
     if [ -n "$_vdi_ll" ]; then
-        case "$_vdi_v" in *"$_vdi_ll"*) ;; *) return 1;; esac
+        # 【2026-11-15 加】连顺序一起判：list 整串必须以 link-local 开头。
+        # uci get 返回的就是落盘顺序，用去掉前导 * 的通配即可，不用拆词。
+        case "$_vdi_v" in "$_vdi_ll"*) ;; *) return 1;; esac
     fi
     # 【2026-11-15 用户定】RA 间隔与 dhcp.lan 段的四项也锁死。
     # 原来 build 会写、verify 不判：被手改后照样判通过，坏值一直留着。
@@ -850,26 +852,27 @@ build_dhcp_ignore() {
     # 固件 /rom/etc/uci-defaults/15_odhcpd 本来就写 disabled，保持默认即可。
     run uci -q set dhcp.lan.ra_preference='high'
     run uci -q set dhcp.lan.dns_service='1'
-    # 【2026-11-15 定稿】RDNSS 只发一条：ULA 地址（EUI-64 形式）。
-    # 为什么不用 link-local：实测 Windows 对 fe80:: 做 DNS 服务器时会超时
-    #   （本机 nslookup 通、Windows 侧 DNS request timed out）。
-    # 为什么用 ULA：LAB 地址由 ula_prefix + ip6assign + ip6ifaceid=eui64 产生，
-    #   valid_lft forever（实测），不随运营商 PD 变，Windows/Linux 都能用。
+    # 【2026-11-15 用户定】RDNSS 发两条，顺序：link-local 在前、ULA 在后。
+    # 为什么 link-local 排第一：用户要求 —— 客户端按收到的顺序取，排第一的先被采用。
+    #   已知风险（实测）：Windows 拿 fe80:: 当 DNS 服务器会超时（ping 通、回包源地址不对）。
+    #   实测（2026-11-15 09:50，把顺序对调后）：已联网的 Windows 仍只用 ULA 那条，
+    #   解析照常；但**新接入的客户端**会先拿到 link-local。
+    # 为什么还要 ULA：EUI-64 形式，valid_lft forever（实测），Windows/Linux 都可用，
+    #   不随运营商 PD 变 —— link-local 答不了时它是兜底。
     # 为什么是 EUI-64 不是 ::1：ip6ifaceid 不设时 netifd 给的是 ::1，实测反复
     #   变 deprecated；显式写 eui64 后地址固定、永久有效。
     # 动态取而不写死：换网卡 MAC 变，地址跟着变，脚本自己算得出来。
     _bdi_ula=$(run ip -6 addr show br-lan 2>/dev/null \
                | grep 'inet6 fd' | awk '{print $2}' | cut -d/ -f1 | head -n1)
-    # 【2026-11-15 加】第二条：link-local，放在 ULA 后面作备选。
-    # 实测 Windows 用它做 DNS 会超时（ping 通、回包源地址不对），但 Linux/Android
-    # 和部分设备能正常用；排在后面不影响 Windows（前面的 ULA 能答就不会问它）。
+    # link-local：由 br-lan 的 MAC 生成，同一硬件永不变，RFC 8106 允许放进 RDNSS。
+    # 只认 proto kernel_ll：排除手工加过的和已废弃的，避免同接口多条时取错。
     _bdi_ll=$(run ip -6 addr show br-lan 2>/dev/null \
               | grep 'inet6 fe80:' | grep 'proto kernel_ll' \
               | awk '{print $2}' | cut -d/ -f1 | head -n1)
     if [ -n "$_bdi_ula" ]; then
         run uci -q delete dhcp.lan.dns
-        run uci -q add_list dhcp.lan.dns="$_bdi_ula"
         [ -n "$_bdi_ll" ] && run uci -q add_list dhcp.lan.dns="$_bdi_ll"
+        run uci -q add_list dhcp.lan.dns="$_bdi_ula"
     else
         log "[DHCP] 取不到 br-lan 的 ULA 地址，跳过 DNS 通告配置"
     fi
