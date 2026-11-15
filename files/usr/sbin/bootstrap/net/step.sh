@@ -320,6 +320,14 @@ verify_lan_static() {
     # 这里就是要让它按空白拆开、按位置取 $1..$4；加引号反而会变成一个整体。
     # shellcheck disable=SC2046
     set -- $(_lan_static_conf)
+    # 【2026-11-15 加】两个接口都必须是启用状态。
+    # disabled='1' 时 netifd 根本不启动该接口 —— 对其他判据来说等于「全部失效」，
+    # 所以放在最前面先判。
+    #   · lan  被禁 → br-lan 没有地址 → SSH/LuCI 全断，只能接显示器或 failsafe；
+    #   · lan6 被禁 → 不发 RS、不拿 PD → 下游 8c01 段地址消失。
+    # 代价是「禁用该接口」这个开关此后由脚本维护，手动关了 10~12 分钟内会被改回。
+    [ "$(run uci -q get network.lan.disabled 2>/dev/null)" != "1" ] || return 1
+    [ "$(run uci -q get network.lan6.disabled 2>/dev/null)" != "1" ] || return 1
     [ "$(run uci -q get network.lan.proto 2>/dev/null)" = "static" ] || return 1
     [ "$(run uci -q get network.lan.device 2>/dev/null)" = "br-lan" ] || return 1
     [ "$(run uci -q get network.lan.ipaddr 2>/dev/null)" = "$1" ] || return 1
@@ -717,6 +725,11 @@ build_lan_static() {
     # 因此配置动作放在同一处、提交一次，避免「lan 提交了、lan6 还在内存里」这种半截状态。
     #
     # ---- lan：IPv4 静态 ----
+    # 【2026-11-15 加】确保两个接口都是启用状态（删掉 disabled，不是设 0）。
+    # 为什么是 delete 而不是 set '0'：uci 里 disabled 只要不是 "1" 就等同启用，
+    # 删掉能让配置回到最干净的状态，和固件初始配置一致。
+    run uci -q delete network.lan.disabled
+    run uci -q delete network.lan6.disabled
     run uci -q set network.lan.proto='static'
     run uci -q set network.lan.device='br-lan'
     run uci -q set network.lan.ipaddr="$1"
