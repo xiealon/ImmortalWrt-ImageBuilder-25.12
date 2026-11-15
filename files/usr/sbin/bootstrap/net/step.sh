@@ -849,6 +849,10 @@ build_dhcp_ignore() {
     #   smartdns 绑 fe80:: 直接 EINVAL（缺 scope id，且不支持 %iface 写法），
     #   换成 dnsmasq 现象一样，所以不是 DNS 程序的问题。
     # 为什么是 EUI-64 不是 ::1：ip6ifaceid 不设时 netifd 给 ::1，实测反复 deprecated。
+    # dns_service 显式写 1（**不删除**）：与路由器上跑的那版保持一致。
+    # odhcpd 源码里它默认就是 true，写不写都能发 RDNSS；写 1 是为了让配置自解释，
+    # 也避免老版本固件（默认值不同）上莫名其妙不发。
+    run uci -q set dhcp.lan.dns_service='1'
     # 动态取而不写死：换网卡 MAC 变，地址跟着变，脚本自己算得出来。
     _bdi_ula=$(run ip -6 addr show br-lan 2>/dev/null \
                | grep 'inet6 fd' | awk '{print $2}' | cut -d/ -f1 | head -n1)
