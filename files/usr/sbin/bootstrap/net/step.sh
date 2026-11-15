@@ -412,8 +412,8 @@ verify_dhcp_ignore() {
     #   · interface 被改错 → odhcpd 服务到别的接口，RA 发不出去；
     #   · start/limit/leasetime 是 DHCPv4 池，dhcpv4 关着时无实际作用，但写死了
     #     才能保证「段被重建」时不出现两套口径。
-    [ "$(run uci -q get dhcp.lan.ra_mininterval 2>/dev/null)" = "30" ] || return 1
-    [ "$(run uci -q get dhcp.lan.ra_maxinterval 2>/dev/null)" = "60" ] || return 1
+    # 【2026-11-15 用户定】ra_mininterval / ra_maxinterval 不再判：RA 间隔交给
+    # odhcpd 默认值，脚本不去锁 30/60。
     [ "$(run uci -q get dhcp.lan.interface 2>/dev/null)" = "lan" ] || return 1
     [ "$(run uci -q get dhcp.lan.start 2>/dev/null)" = "231" ] || return 1
     [ "$(run uci -q get dhcp.lan.limit 2>/dev/null)" = "20" ] || return 1
@@ -830,8 +830,7 @@ build_dhcp_ignore() {
     # 不再「只在某条件下删」：无条件删，配合 verify 判「必须为空」，手填的地址会被
     # 下一轮 --fix 清掉 —— 否则一个手工值会永久生效，RDNSS 又变回写死。
     run uci -q delete dhcp.lan.dns
-    run uci -q set dhcp.lan.ra_mininterval='30'
-    run uci -q set dhcp.lan.ra_maxinterval='60'
+    # 【2026-11-15 用户定】不写 ra_mininterval / ra_maxinterval，用 odhcpd 默认值。
     # 所有 dnsmasq 段删掉 authoritative：旁路由不是权威 DHCP，避免抢答
     for _dm in $(run uci show dhcp 2>/dev/null | grep -E '=dnsmasq$' | cut -d. -f2 | cut -d= -f1); do
         run uci -q delete "dhcp.$_dm.authoritative" 2>/dev/null
