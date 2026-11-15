@@ -402,16 +402,15 @@ verify_dhcp_ignore() {
     [ "$(run uci -q get dhcp.lan.dhcpv4 2>/dev/null)" = "disabled" ] || return 1
     [ "$(run uci -q get dhcp.lan.ra 2>/dev/null)" = "server" ] || return 1
     [ "$(run uci -q get dhcp.lan.ra_preference 2>/dev/null)" = "high" ] || return 1
-    # 【2026-11-15 用户定】RDNSS 判「等于本机 br-lan 当前的 ULA 地址」（EUI-64 形式）。
-    # 判现算值而不是判非空：换网卡后 MAC 变、地址跟着变，只判非空的话旧地址会一直
-    # 留着，客户端拿到的是死地址。
-    # ULA 还没上来时放行（交给 lan_static 的 ifup 去拉），否则这里判不过、build 也
-    # 写不出地址，就成了死循环。
+    # 【2026-11-15 定稿｜与设备上跑的那版一致】
+    #   · dns_service 必须是 1（不删除、显式写死）；
+    #   · RDNSS 只判一条 ULA 地址（EUI-64 形式），判「等于现算值」而不是判非空 ——
+    #     换网卡后 MAC 变、地址跟着变，只判非空的话旧地址会一直留着，客户端拿到死地址。
+    [ "$(run uci -q get dhcp.lan.dns_service 2>/dev/null)" = "1" ] || return 1
     _vdi_ula=$(run ip -6 addr show br-lan 2>/dev/null \
                | grep 'inet6 fd' | awk '{print $2}' | cut -d/ -f1 | head -n1)
-    if [ -n "$_vdi_ula" ]; then
-        [ "$(run uci -q get dhcp.lan.dns 2>/dev/null)" = "$_vdi_ula" ] || return 1
-    fi
+    [ -n "$_vdi_ula" ] || return 1
+    [ "$(run uci -q get dhcp.lan.dns 2>/dev/null)" = "$_vdi_ula" ] || return 1
     # 【2026-11-15 用户定】RA 间隔与 dhcp.lan 段的四项也锁死。
     # 原来 build 会写、verify 不判：被手改后照样判通过，坏值一直留着。
     #   · ra_min/maxinterval 被改大 → 抢不过光猫（它 200-600s），Windows 的 RDNSS 会被覆盖；
@@ -874,7 +873,7 @@ build_dhcp_ignore() {
     # 所以让位跟着 smartdns 的接管结果走（port=53 + auto_set_dnsmasq=1 时，
     # 由 smartdns 自己的 init 让 dnsmasq 退出 53，见 pkg-restore-smartdns.sh 文件头）：
     # 能接管了才放手，接管不了就继续让 dnsmasq 顶着。
-    log "[DHCP] IPv6 RA 已接管：ra=server pref=high interval=30-60s RDNSS=本机 ULA（IPv4 DHCP 仍关闭）"
+    log "[DHCP] IPv6 RA 已接管：ra=server pref=high interval=30-60s dns_service=1 interval=30-60s（IPv4 DHCP 仍关闭）"
     return 0
 }
 
