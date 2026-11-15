@@ -402,15 +402,10 @@ verify_dhcp_ignore() {
     [ "$(run uci -q get dhcp.lan.dhcpv4 2>/dev/null)" = "disabled" ] || return 1
     [ "$(run uci -q get dhcp.lan.ra 2>/dev/null)" = "server" ] || return 1
     [ "$(run uci -q get dhcp.lan.ra_preference 2>/dev/null)" = "high" ] || return 1
-    # 【2026-11-15 定稿｜与设备上跑的那版一致】
-    #   · dns_service 必须是 1（不删除、显式写死）；
-    #   · RDNSS 只判一条 ULA 地址（EUI-64 形式），判「等于现算值」而不是判非空 ——
-    #     换网卡后 MAC 变、地址跟着变，只判非空的话旧地址会一直留着，客户端拿到死地址。
+    # 【2026-11-15 用户定】dns_service 必须是 1（不删除、显式写死）。
     [ "$(run uci -q get dhcp.lan.dns_service 2>/dev/null)" = "1" ] || return 1
-    _vdi_ula=$(run ip -6 addr show br-lan 2>/dev/null \
-               | grep 'inet6 fd' | awk '{print $2}' | cut -d/ -f1 | head -n1)
-    [ -n "$_vdi_ula" ] || return 1
-    [ "$(run uci -q get dhcp.lan.dns 2>/dev/null)" = "$_vdi_ula" ] || return 1
+    # dns 不判：留空 = 让 odhcpd 按接口当前状态自己挑（ULA 活着发 ULA，掉了就换运营商
+    # 地址）。写死任何值都会在地址状态变化时变成死地址，所以这里不做判断。
     # 【2026-11-15 用户定】RA 间隔与 dhcp.lan 段的四项也锁死。
     # 原来 build 会写、verify 不判：被手改后照样判通过，坏值一直留着。
     #   · ra_min/maxinterval 被改大 → 抢不过光猫（它 200-600s），Windows 的 RDNSS 会被覆盖；
@@ -838,29 +833,20 @@ build_dhcp_ignore() {
     # managed-config，它会真去分配地址，可能又抢到光猫的 8c00 段。
     # 固件 /rom/etc/uci-defaults/15_odhcpd 本来就写 disabled，保持默认即可。
     run uci -q set dhcp.lan.ra_preference='high'
-    # 【2026-11-15 用户定】RDNSS 只写一条：本机 br-lan 的 ULA 地址（EUI-64 形式）。
-    # 为什么不用 odhcpd 自选：它挑的地址会随接口状态漂 —— 实测 10:12 抓包发的是
-    #   240e:381:8d5f:8c00:327b:acff:fef9:2d2f（那时 ULA 被 rfc9096 标成 deprecated），
-    #   10:19 ifup 把 ULA 拉回 preferred 之后又变成 fd80:e247:db6e:0:327b:acff:fef9:2d2f。
-    #   用户要的是一个固定值，不要它自己漂。
-    # 为什么不是 link-local：实测它能收不能答 —— 抓包只看到查询进路由器
-    #   （fe80::客户端.5xxxx > fe80::327b:…:2d2f.53），一个回包都没有；
-    #   smartdns 绑 fe80:: 直接 EINVAL（缺 scope id，且不支持 %iface 写法），
-    #   换成 dnsmasq 现象一样，所以不是 DNS 程序的问题。
-    # 为什么是 EUI-64 不是 ::1：ip6ifaceid 不设时 netifd 给 ::1，实测反复 deprecated。
     # dns_service 显式写 1（**不删除**）：与路由器上跑的那版保持一致。
     # odhcpd 源码里它默认就是 true，写不写都能发 RDNSS；写 1 是为了让配置自解释，
     # 也避免老版本固件（默认值不同）上莫名其妙不发。
     run uci -q set dhcp.lan.dns_service='1'
-    # 动态取而不写死：换网卡 MAC 变，地址跟着变，脚本自己算得出来。
-    _bdi_ula=$(run ip -6 addr show br-lan 2>/dev/null \
-               | grep 'inet6 fd' | awk '{print $2}' | cut -d/ -f1 | head -n1)
-    if [ -n "$_bdi_ula" ]; then
-        run uci -q delete dhcp.lan.dns
-        run uci -q add_list dhcp.lan.dns="$_bdi_ula"
-    else
-        log "[DHCP] 取不到 br-lan 的 ULA 地址，跳过 DNS 通告配置"
-    fi
+    # 【2026-11-15 用户定】dhcp.lan.dns 删空，不写任何地址 —— 让 odhcpd 自己挑。
+    # 为什么不写死 ULA：ULA 是本机静态派生的，没有上游给它续命；实测一次 ifup 触发
+    #   rfc9096 判定后它被标 stale → netifd 降为 deprecated（preferred 0）→ 寿命倒计时
+    #   → 掉光，只剩 ifup 能拉回来。写死它等于把 RDNSS 钉在一个会消失的地址上。
+    #   交给 odhcpd，它每次发 RA 时按接口当前状态挑：ULA 活着就用 ULA（抓包实测发
+    #   fd80:e247:db6e:0:327b:acff:fef9:2d2f），ULA 掉了就自动换成运营商地址
+    #   （实测 10:12 发的是 240e:381:8d5f:8c00:327b:acff:fef9:2d2f）—— 自我恢复。
+    # 为什么不写 link-local：实测它能收不能答（抓包只有请求没有回包；smartdns 绑
+    #   fe80:: 直接 EINVAL，换 dnsmasq 一样超时）。odhcpd 只在没有任何其它地址时才退它。
+    run uci -q delete dhcp.lan.dns
     run uci -q set dhcp.lan.ra_mininterval='30'
     run uci -q set dhcp.lan.ra_maxinterval='60'
     # 所有 dnsmasq 段删掉 authoritative：旁路由不是权威 DHCP，避免抢答
