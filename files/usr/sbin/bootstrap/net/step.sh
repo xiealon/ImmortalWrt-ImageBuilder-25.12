@@ -411,8 +411,17 @@ verify_dhcp_ignore() {
     # 只判非空的话旧地址会一直留着，客户端拿到的是死地址。
     _vdi_ula=$(run ip -6 addr show br-lan 2>/dev/null \
                | grep 'inet6 fd' | awk '{print $2}' | cut -d/ -f1 | head -n1)
+    _vdi_ll=$(run ip -6 addr show br-lan 2>/dev/null \
+              | grep 'inet6 fe80:' | grep 'proto kernel_ll' \
+              | awk '{print $2}' | cut -d/ -f1 | head -n1)
     [ -n "$_vdi_ula" ] || return 1
-    [ "$(run uci -q get dhcp.lan.dns 2>/dev/null)" = "$_vdi_ula" ] || return 1
+    # 【2026-11-15 改】dns 现在是含两条的 list，uci get 返回空格分隔的整串，
+    # 用 case 逐个匹配（uci get 对 list 只给整串，不能直接 = 比较）。
+    _vdi_v=$(run uci -q get dhcp.lan.dns 2>/dev/null)
+    case "$_vdi_v" in *"$_vdi_ula"*) ;; *) return 1;; esac
+    if [ -n "$_vdi_ll" ]; then
+        case "$_vdi_v" in *"$_vdi_ll"*) ;; *) return 1;; esac
+    fi
     # 【2026-11-15 用户定】RA 间隔与 dhcp.lan 段的四项也锁死。
     # 原来 build 会写、verify 不判：被手改后照样判通过，坏值一直留着。
     #   · ra_min/maxinterval 被改大 → 抢不过光猫（它 200-600s），Windows 的 RDNSS 会被覆盖；
@@ -851,9 +860,16 @@ build_dhcp_ignore() {
     # 动态取而不写死：换网卡 MAC 变，地址跟着变，脚本自己算得出来。
     _bdi_ula=$(run ip -6 addr show br-lan 2>/dev/null \
                | grep 'inet6 fd' | awk '{print $2}' | cut -d/ -f1 | head -n1)
+    # 【2026-11-15 加】第二条：link-local，放在 ULA 后面作备选。
+    # 实测 Windows 用它做 DNS 会超时（ping 通、回包源地址不对），但 Linux/Android
+    # 和部分设备能正常用；排在后面不影响 Windows（前面的 ULA 能答就不会问它）。
+    _bdi_ll=$(run ip -6 addr show br-lan 2>/dev/null \
+              | grep 'inet6 fe80:' | grep 'proto kernel_ll' \
+              | awk '{print $2}' | cut -d/ -f1 | head -n1)
     if [ -n "$_bdi_ula" ]; then
         run uci -q delete dhcp.lan.dns
         run uci -q add_list dhcp.lan.dns="$_bdi_ula"
+        [ -n "$_bdi_ll" ] && run uci -q add_list dhcp.lan.dns="$_bdi_ll"
     else
         log "[DHCP] 取不到 br-lan 的 ULA 地址，跳过 DNS 通告配置"
     fi
