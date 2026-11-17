@@ -276,7 +276,16 @@ if echo "$PACKAGES" | grep -q "honk"; then
     _hk_api="https://api.github.com/repos/xiealon/CloudRunFilesBuilder/releases/tags/honk-apk"
     echo "==> honk: 读取 Release 资产清单"
     echo "    $_hk_api"
-    _hk_json=$(wget -qO- --timeout=30 --tries=3 "$_hk_api" 2>/dev/null) || _hk_json=""
+    # 【2026-11-17】匿名 GitHub API 只有 60 次/小时/IP，两条固件线并行时必有一条
+    # 拿不到资产清单（实测 daed 就是这么挂的）。有 token 就走鉴权，没有才退回匿名。
+    _hk_json=""
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        _hk_json=$(curl -fsSL --retry 3 --connect-timeout 20 --max-time 60 \
+            -H "Authorization: Bearer $GITHUB_TOKEN" "$_hk_api" 2>/dev/null) || _hk_json=""
+    fi
+    if [ -z "$_hk_json" ]; then
+        _hk_json=$(wget -qO- --timeout=30 --tries=3 "$_hk_api" 2>/dev/null) || _hk_json=""
+    fi
     if [ -z "$_hk_json" ]; then
         echo "::error::honk: 取不到 honk-apk Release 资产清单（网络不通或 Release 不存在）"
         exit 1
