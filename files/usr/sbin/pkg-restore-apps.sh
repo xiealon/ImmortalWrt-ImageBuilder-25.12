@@ -223,13 +223,19 @@ _pa_installed() {
 #     echo "RC=$?"        ← 拿到的是 tail 的 0，apk 明明失败却当成功
 # 差点在设备上把 smartdns 删掉后装不回来。
 _pa_add_local() {
+    # 【2026-11-17 用户定】去掉 apk update 的网络兜底，并优先用固件自带本地包库：
+    #   /rom/root/apk-cache/{*.apk, packages.adb, repositories}
+    #   repositories 内容一行 file:///rom/root/apk-cache/packages.adb（build25.sh 生成）。
+    #   --repositories-file 覆盖 /etc/apk/repositories = 只认本地：不联网、不受 mirrors
+    #   源 404/EOF 影响，且能按索引解析依赖（带 kmod 依赖的包才装得回来）。
+    #   没有索引文件时退回 --no-network 单包尝试（只对无依赖包有效）。
     _pal_log=/tmp/.pa_add.$$.log
-    apk add --no-network --allow-untrusted --force-overwrite "$1" >"$_pal_log" 2>&1
-    _pal_rc=$?
-    [ "$_pal_rc" -eq 0 ] && { rm -f "$_pal_log"; return 0; }
-    # 本地索引还没加载时 apk 会报 no such package，刷一次（纯本地，0 秒）再试
-    apk update >/dev/null 2>&1
-    apk add --no-network --allow-untrusted --force-overwrite "$1" >"$_pal_log" 2>&1
+    if [ -s /rom/root/apk-cache/repositories ]; then
+        apk add --allow-untrusted --force-overwrite \
+            --repositories-file /rom/root/apk-cache/repositories "$1" >"$_pal_log" 2>&1
+    else
+        apk add --no-network --allow-untrusted --force-overwrite "$1" >"$_pal_log" 2>&1
+    fi
     _pal_rc=$?
     rm -f "$_pal_log"
     return "$_pal_rc"
