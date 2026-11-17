@@ -919,6 +919,33 @@ if [ -n "$_ak_miss" ]; then
     echo "::warning::以下包在官方源上没下到（可能已改名或不在 25.12.2 源里）：$_ak_miss"
 fi
 
+# ---- 【2026-11-17 用户定 · C3】全量 kmod + honk 依赖包也收进包库 ----
+# 为什么必须收：内核是我们自建的（6.12.103-1-<自建 hash>），上游 mirrors 里
+# 只有官方内核 hash 的 kmods 目录，我们这份在那边根本不存在（实测 302→404）。
+# 于是「kmod 被 apk del 掉」就再也装不回来 —— 2026-11-17 卸 honk 时实测：
+# honk 依赖的 kmod-nft-queue 无法恢复，apk add 直接卡在依赖上。
+# 用户定：x86-64 rootfs 至少 10G，不差这点空间，全量收（约 1200 个 kmod）。
+# 来源：workflow 已把 1688 个 apk 全集解到 packages/official/，本地拷贝不联网。
+_ak_c3=0
+for _f in packages/official/kmod-*.apk; do
+    [ -f "$_f" ] || continue
+    _ak_is_apk "$_f" || continue
+    cp -f "$_f" "$_AK_DIR"/ && _ak_c3=$((_ak_c3 + 1))
+done
+echo "==> [apk-cache] 来源 C3（全量 kmod）：$_ak_c3 个 apk"
+# honk 的 feed 依赖（coreutils-stat / sqlite3-cli）也来自官方源，之前靠 DEPENDS 在
+# make image 时才落地、库里没有，导致 honk 卸了装不回来。这里一并收进库。
+_ak_c3d=0
+for _ak_w in coreutils-stat sqlite3-cli; do
+    for _f in packages/official/"$_ak_w"-[0-9]*.apk; do
+        [ -f "$_f" ] || continue
+        _ak_is_apk "$_f" || continue
+        [ -f "$_AK_DIR/${_f##*/}" ] && continue
+        cp -f "$_f" "$_AK_DIR"/ && _ak_c3d=$((_ak_c3d + 1))
+    done
+done
+echo "==> [apk-cache] 来源 C3（honk 依赖）：$_ak_c3d 个 apk"
+
 # ---- 【2026-11-09】同名多版本去重 ----
 # run 包实测会带同一个包两个版本（201 上 daed-2026.06.14-r1 与 -r7 并存，差 25MB）。
 # 旧版白占 squashfs，还会让 apk fix 找「已装版本」时多绕。只留版本最高的。
@@ -946,6 +973,15 @@ echo "==> [apk-cache] 去重共删 $_ak_dedup_n 个旧版本"
 _ak_n=$(ls "$_AK_DIR"/*.apk 2>/dev/null | wc -l)
 _ak_sz=$(du -sh "$_AK_DIR" 2>/dev/null | cut -f1)
 echo "==> [apk-cache] 合计 $_ak_n 个 apk，$_ak_sz，位于 /root/apk-cache/（刷机后为只读的 /rom/root/apk-cache）"
+
+# ---- 【2026-11-17 · C3】给包库配一份「只认本地」的仓库清单 ----
+# 运行时 pkg-restore-apps.sh 用 --repositories-file 指过来：
+#   apk add --repositories-file /rom/root/apk-cache/repositories <包名>
+# 这样既不联网，也不受 mirrors 源 404/EOF 影响，还能按 packages.adb 解析依赖。
+# 实测（192.168.1.201）：不这么写时 apk add --no-network 会把所有仓库
+# mask 掉（报 masked in: --no-network），带依赖的包永远装不上。
+printf 'file:///rom/root/apk-cache/packages.adb\n' > "$_AK_DIR/repositories"
+echo "==> [apk-cache] 已生成 repositories：$(cat "$_AK_DIR/repositories")"
 
 # ---- 【2026-11-02】geo 数据只按 apk 核对，不碰 .dat ----
 # 用户定：geoip / geosite 验证 apk，不验证文件 —— 因为这两份数据需要更新，
