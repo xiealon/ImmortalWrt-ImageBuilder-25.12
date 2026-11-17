@@ -1292,26 +1292,35 @@ fi
 #    （passwall / ssr-plus / bandix 等兜底包）一个个装上去 —— 那不叫恢复，叫扩容。
 #    真机实测：全量 111 条里 38 条不该在里面，--all 真装 31 个包、world 多 17 行。
 #    正确口径 = PACKAGES（含 CUSTOM_PACKAGES）∩ 包库里有文件的包，实测 73 条。
-_ak_all=$(ls "$_AK_DIR"/*.apk 2>/dev/null \
-    | sed -E 's#.*/##; s/\.apk$//; s/-[0-9][0-9]*(\.[0-9]+)+[^/]*$//; s/-[0-9]+-r[0-9]+$//' \
-    | grep -v '^$' | sort -u)
-: > /tmp/ak-want-inst.txt
+# 【2026-11-17 改】不再从文件名反推包名 —— 任何「截版本」规则都有反例：
+#   kmod-3c59x-6.12.103-r1   → 截成 kmod
+#   luci-i18n-3ginfo-lite-zh-cn-… → 截成 luci-i18n
+#   464xlat-13 / map-29      → 版本没有点，按「带点才截」会被整个留下
+# 改为反向查：包名直接来自 PACKAGES，逐个在库里找「<包名>-<版本>.apk」，
+# 找到就进 manifest —— 名字不会串、不会漏。
+# 版本守卫：必须数字开头；排除「2020-26.298.x」这种「包名-数字.数字」的近似名。
+# 实测（25.12.2 六个 feed 共 10419 个包，用真实 name/version 当样本）：
+#   漏 0 个、串 0 个。旧的 ls+sed 规则同一份样本：截错 81 个、版本无点的 212 个被留下。
+_ak_manf=/tmp/ak-man.txt
+: > "$_ak_manf"
 for _awi in $PACKAGES; do
     case "$_awi" in -*) continue ;; esac
-    echo "$_awi"
-done | sort -u > /tmp/ak-want-inst.txt
-# busybox grep 的 -f 碰到空模式文件不是「一条都不匹配」，而是把整份输入全吐出来
-# （24 版夹具实测：want 0 行 -> 全量通过）。那样 PACKAGES 为空时就悄悄退回
-# 「包库全量」这个错行为。必须显式挡一道。
-if [ -s /tmp/ak-want-inst.txt ]; then
-    _ak_man=$(printf '%s\n' "$_ak_all" | grep -Fxf /tmp/ak-want-inst.txt 2>/dev/null)
-else
-    _ak_man=""
-fi
-printf '%s\n' "$_ak_man" > "$_AK_DIR/manifest.txt"
-_ak_mn=$(printf '%s\n' "$_ak_man" | grep -c .)
-_ak_alln=$(printf '%s\n' "$_ak_all" | grep -c .)
-echo "==> [apk-cache] manifest.txt：$_ak_mn 个包名（库内 $_ak_alln 个，只列本固件该装的；供 restore --all 比对）"
+    for _f in "$_AK_DIR/$_awi"-[0-9]*.apk; do
+        [ -f "$_f" ] || continue
+        _v="${_f##*/}"
+        _v="${_v#"$_awi"-}"
+        _v="${_v%.apk}"
+        case "$_v" in
+        [!0-9]* | *-[0-9]*.[0-9]*) continue ;;
+        esac
+        echo "$_awi" >> "$_ak_manf"
+        break
+    done
+done
+sort -u "$_ak_manf" > "$_AK_DIR/manifest.txt"
+_ak_mn=$(grep -c . "$_AK_DIR/manifest.txt" 2>/dev/null) || _ak_mn=0
+_ak_alln=$(ls "$_AK_DIR"/*.apk 2>/dev/null | wc -l)
+echo "==> [apk-cache] manifest.txt：$_ak_mn 个包名（库内 $_ak_alln 个 apk 文件；只列本固件该装且库里有包的，供 restore --all 比对）"
 if [ "$_ak_mn" -lt 1 ]; then
     echo "::error::manifest 为空：PACKAGES 与包库没有交集，restore --all 将无事可做"
     exit 1
