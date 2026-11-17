@@ -545,6 +545,8 @@ jobs:
           echo "==> IB 就绪：$(du -sh "$IB" | cut -f1)"
 
       - name: Build ImmortalWrt x86-64 EFI 25.12.x
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           profile="${{ github.event.inputs['Profile'] }}"
           case "$profile" in
