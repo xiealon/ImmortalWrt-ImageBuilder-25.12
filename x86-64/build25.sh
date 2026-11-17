@@ -1294,7 +1294,7 @@ fi
 #    真机实测：全量 111 条里 38 条不该在里面，--all 真装 31 个包、world 多 17 行。
 #    正确口径 = PACKAGES（含 CUSTOM_PACKAGES）∩ 包库里有文件的包，实测 73 条。
 _ak_all=$(ls "$_AK_DIR"/*.apk 2>/dev/null \
-    | sed -E 's#.*/##; s/\.apk$//; s/-[0-9][0-9A-Za-z._~-]*$//' \
+    | sed -E 's#.*/##; s/\.apk$//; s/-[0-9][0-9]*(\.[0-9]+)+[^/]*$//; s/-[0-9]+-r[0-9]+$//' \
     | grep -v '^$' | sort -u)
 : > /tmp/ak-want-inst.txt
 for _awi in $PACKAGES; do
