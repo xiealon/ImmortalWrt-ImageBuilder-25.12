@@ -229,8 +229,19 @@ _pa_add_local() {
     #   · 源不可用时（mirrors.vsean.net 的 video / kmods 源 404/EOF）反而拖慢开机；
     #   · 能不能补，只取决于 /rom/root/apk-cache 里有没有那份 apk。有就装上，
     #     没有就如实报失败（日志写明包名），交给重刷固件，不再假装能联网解决。
+    # 【2026-11-17 用户定 · C 方案】优先用固件自带的本地包库 + 索引离线装：
+    #   /rom/root/apk-cache/{*.apk, packages.adb, repositories}
+    #   文件内容就一行 file:///rom/root/apk-cache/packages.adb（build25.sh 生成）。
+    #   --repositories-file 覆盖掉 /etc/apk/repositories，等于「只认本地」：
+    #   既不需要联网，也不受 mirrors 源 404/EOF 影响；带 kmod 依赖的包（honk）
+    #   才能把依赖一起解析出来。没有索引文件时退回老的 --no-network 单包尝试。
     _pal_log=/tmp/.pa_add.$$.log
-    apk add --no-network --allow-untrusted --force-overwrite "$1" >"$_pal_log" 2>&1
+    if [ -s /rom/root/apk-cache/repositories ]; then
+        apk add --allow-untrusted --force-overwrite \
+            --repositories-file /rom/root/apk-cache/repositories "$1" >"$_pal_log" 2>&1
+    else
+        apk add --no-network --allow-untrusted --force-overwrite "$1" >"$_pal_log" 2>&1
+    fi
     _pal_rc=$?
     rm -f "$_pal_log"
     return "$_pal_rc"
