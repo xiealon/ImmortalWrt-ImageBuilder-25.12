@@ -357,6 +357,14 @@ _pa_repair() {
             log "装回失败 $_pa_p（本地包库没有它，或依赖缺失待 --deps 补齐）"
         fi
     done
+	# 【2026-11-17】LuCI 菜单索引缓存里存的是「装包前」的模块列表：自愈装回
+	# luci-app-* 之后，浏览器强刷也看不到新菜单（实测 honk：「服务」菜单整项
+	# 不出现，必须手工 rm /tmp/luci-indexcache* 才恢复）。装完就清一次。
+	if [ "$_pa_n" -gt 0 ]; then
+		rm -f /tmp/luci-indexcache* 2>/dev/null
+		rm -rf /tmp/luci-modulecache/* 2>/dev/null
+		[ -x /etc/init.d/uhttpd ] && /etc/init.d/uhttpd reload >/dev/null 2>&1
+	fi
     [ "$_pa_n" -gt 0 ] || log "无需装回（没有「该有却缺失」的应用）"
     # 装完必须重判。apk 没有缓存，直接重算即可。
     [ -z "$(_pa_missing)" ]
