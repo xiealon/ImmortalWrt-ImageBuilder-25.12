@@ -223,12 +223,13 @@ _pa_installed() {
 #     echo "RC=$?"        ← 拿到的是 tail 的 0，apk 明明失败却当成功
 # 差点在设备上把 smartdns 删掉后装不回来。
 _pa_add_local() {
+    # 【2026-11-17 用户定】去掉 apk update 的网络兜底 —— 没必要，也救不了。
+    #   · 有些包压根不在任何 apk 源里：自建内核的 kmod 源（kmods/6.12.103-1-<我们内核
+    #     hash>）上游没有这个目录，刷索引只会多等一轮网络，最后还是 no such package；
+    #   · 源不可用时（mirrors.vsean.net 的 video / kmods 源 404/EOF）反而拖慢开机；
+    #   · 能不能补，只取决于 /rom/root/apk-cache 里有没有那份 apk。有就装上，
+    #     没有就如实报失败（日志写明包名），交给重刷固件，不再假装能联网解决。
     _pal_log=/tmp/.pa_add.$$.log
-    apk add --no-network --allow-untrusted --force-overwrite "$1" >"$_pal_log" 2>&1
-    _pal_rc=$?
-    [ "$_pal_rc" -eq 0 ] && { rm -f "$_pal_log"; return 0; }
-    # 本地索引还没加载时 apk 会报 no such package，刷一次（纯本地，0 秒）再试
-    apk update >/dev/null 2>&1
     apk add --no-network --allow-untrusted --force-overwrite "$1" >"$_pal_log" 2>&1
     _pal_rc=$?
     rm -f "$_pal_log"
