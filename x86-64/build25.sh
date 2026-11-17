@@ -950,8 +950,12 @@ for _ak_w in coreutils-stat sqlite3-cli; do
         [ -f "$_AK_DIR/${_f##*/}" ] && continue
         cp -f "$_f" "$_AK_DIR"/ && _ak_c3d=$((_ak_c3d + 1))
     done
+    # 拷完必须真的有：来源 B（白名单直下）收了也行、这里补也行；
+    # 两边都没有就是库不完整 —— honk 被 apk del 掉后永远装不回来，必须当场失败。
+    ls "$_AK_DIR/$_ak_w"-[0-9]*.apk >/dev/null 2>&1 \
+        || { echo "::error::apk-cache 缺 $_ak_w（来源 B 与 official/ 都没有），honk 卸载后装不回来"; exit 1; }
 done
-echo "==> [apk-cache] 来源 C3（honk 依赖）：$_ak_c3d 个 apk"
+echo "==> [apk-cache] 来源 C3（honk 依赖）：补拷 $_ak_c3d 个，库内已核验 coreutils-stat / sqlite3-cli 齐备"
 
 # ---- 【2026-11-09】同名多版本去重 ----
 # run 包实测会带同一个包两个版本（201 上 daed-2026.06.14-r1 与 -r7 并存，差 25MB）。
@@ -1289,7 +1293,7 @@ fi
 #    真机实测：全量 111 条里 38 条不该在里面，--all 真装 31 个包、world 多 17 行。
 #    正确口径 = PACKAGES（含 CUSTOM_PACKAGES）∩ 包库里有文件的包，实测 73 条。
 _ak_all=$(ls "$_AK_DIR"/*.apk 2>/dev/null \
-    | sed -E 's#.*/##; s/\.apk$//; s/-[0-9][0-9A-Za-z._~-]*$//' \
+    | sed -E 's#.*/##; s/\.apk$//; s/-[0-9][0-9]*(\.[0-9]+)+[^/]*$//; s/-[0-9]+-r[0-9]+$//' \
     | grep -v '^$' | sort -u)
 : > /tmp/ak-want-inst.txt
 for _awi in $PACKAGES; do
