@@ -961,7 +961,20 @@ echo "==> [apk-cache] 来源 C3（honk 依赖）：$_ak_c3d 个 apk"
 _ak_pn_of() {
     printf '%s' "$1" | awk -F'-' '{pn=""; for(i=1;i<=NF;i++){ if($i ~ /^[0-9]/) break; pn=(pn==""?$i:pn"-"$i) } if(pn!="") print pn}'
 }
-_ak_dupes=$(ls "$_AK_DIR"/*.apk 2>/dev/null | sed 's#.*/##; s#\.apk$##' | while read -r _ak_bn; do _ak_pn_of "$_ak_bn"; done | sort | uniq -d)
+# 【2026-11-17 修】kmod 不参与同名去重。
+# 起因：_ak_pn_of 的启发式是「从左起第一个以数字开头的 -段 之前就是包名」，
+# 但 kmod 的包名天生带数字段 —— kmod-3c59x / kmod-9pnet / kmod-8139cp /
+# kmod-rtw88-8822c / kmod-nls-iso8859-1 / kmod-serial-8250 ……
+# 于是全部被归成「kmod」「kmod-rtw88」「kmod-nls-iso8859」这些假包名，
+# 去重时把同一批里其余全删了：2026-11-17 daed 线实测删掉 44 个真实 kmod
+# （8139too 之外的 8139cp、rtw88/rtw89 全家、nls-iso8859-* 等），
+# 而它们各自都是独立包、只该有一个版本 —— kmod 不需要去重。
+_ak_dupes=$(ls "$_AK_DIR"/*.apk 2>/dev/null | sed 's#.*/##; s#\.apk$##' | while read -r _ak_bn; do
+    case "$_ak_bn" in
+    kmod-*) continue ;;
+    esac
+    _ak_pn_of "$_ak_bn"
+done | sort | uniq -d)
 _ak_dedup_n=0
 for _ak_dp in $_ak_dupes; do
     _ak_best=$(ls "$_AK_DIR/$_ak_dp"-[0-9]*.apk 2>/dev/null | sed 's#.*/##; s#\.apk$##' | sort -V | tail -1)
