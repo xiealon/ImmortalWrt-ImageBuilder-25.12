@@ -933,6 +933,13 @@ for _f in packages/official/kmod-*.apk; do
     cp -f "$_f" "$_AK_DIR"/ && _ak_c3=$((_ak_c3 + 1))
 done
 echo "==> [apk-cache] 来源 C3（全量 kmod）：$_ak_c3 个 apk"
+# 收 0 个说明 packages/official/ 没就位（workflow 的 1688 包全集那步没跑或路径变了），
+# 那样本库就救不了 kmod，必须当场失败，别把一个「看着成功」的固件发出去。
+if [ "$_ak_c3" -lt 100 ]; then
+    echo "::error::来源 C3 只收到 $_ak_c3 个 kmod（预期 1000+）——检查 packages/official/ 是否就位"
+    ls packages/official 2>/dev/null | head -n 5 || echo "packages/official 不存在"
+    exit 1
+fi
 # honk 的 feed 依赖（coreutils-stat / sqlite3-cli）也来自官方源，之前靠 DEPENDS 在
 # make image 时才落地、库里没有，导致 honk 卸了装不回来。这里一并收进库。
 _ak_c3d=0
