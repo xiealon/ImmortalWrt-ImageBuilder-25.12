@@ -1012,6 +1012,15 @@ _ak_n=$(ls "$_AK_DIR"/*.apk 2>/dev/null | wc -l)
 _ak_sz=$(du -sh "$_AK_DIR" 2>/dev/null | cut -f1)
 echo "==> [apk-cache] 合计 $_ak_n 个 apk，$_ak_sz，位于 /root/apk-cache/（刷机后为只读的 /rom/root/apk-cache）"
 
+# ---- 【2026-11-17】给包库配一份「只认本地」的仓库清单 ----
+# 运行时 pkg-restore-apps.sh 用 --repositories-file 指过来：
+#   apk add --repositories-file /rom/root/apk-cache/repositories <包名>
+# 不联网、不受 mirrors 源 404/EOF 影响，且能按 packages.adb 解析依赖。
+# 实测：不这么写时 apk add --no-network 会把所有仓库 mask 掉
+# （报 masked in: --no-network），带依赖的包永远装不上。
+printf 'file:///rom/root/apk-cache/packages.adb\n' > "$_AK_DIR/repositories"
+echo "==> [apk-cache] 已生成 repositories：$(cat "$_AK_DIR/repositories")"
+
 # ---- 【2026-11-02】geo 数据只按 apk 核对，不碰 .dat ----
 # 用户定：geoip / geosite 验证 apk，不验证文件 —— 因为这两份数据需要更新，
 # 按 .dat 文件判会把人的新数据按回出厂版（详见 pkg-restore-apps.sh 的 _PA_GEO）。
