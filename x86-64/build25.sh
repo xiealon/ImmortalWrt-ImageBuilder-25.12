@@ -181,14 +181,16 @@ if echo "$PACKAGES" | grep -q "luci-app-openclash"; then
 #   MetaCubeX 4.2 MB → 1 条死规则：category-games@cn
 #   Loyalsoldier 10.9 MB → 1 条死规则：category-games@cn
 # 也就是说原版 v2fly 根本不含 google-cn / gfw 两个分类，config.dae 里那两条规则一直空转。
-# 取 MetaCubeX：规则覆盖与 Loyalsoldier 相同，体积只有它的 38%。geoip 仍用包里的 v2fly
-# （18.3 MB，含 telegram 等特殊码，实测无告警）。
+# 用户 2026-11-18 定：统一用 Loyalsoldier（与 OpenClash 同源，维护面只有一处）。
+# 体积 10.9 MB（MetaCubeX 4.2 MB），比原 v2fly 2.2 MB 大，honk 启动解析略慢；
+# 但规则覆盖与 MetaCubeX 对 honk 用途相同（实测都只缺 category-games@cn）。
+# geoip 仍用包里的 v2fly（18.3 MB，含 telegram 等特殊码，实测无告警）。
 mkdir -p files/usr/share/v2ray
-MC_GEOSITE="https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geosite.dat"
-if wget -q "$MC_GEOSITE" -O files/usr/share/v2ray/geosite.dat; then
-    echo "✅ honk geosite 已换 MetaCubeX：$(stat -c%s files/usr/share/v2ray/geosite.dat) B"
+LG_GEOSITE="https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat"
+if wget -q "$LG_GEOSITE" -O files/usr/share/v2ray/geosite.dat; then
+    echo "✅ honk geosite 已换 Loyalsoldier：$(stat -c%s files/usr/share/v2ray/geosite.dat) B"
 else
-    echo "::warning::MetaCubeX geosite 下载失败，honk 用回包内 v2fly 版"
+    echo "::warning::Loyalsoldier geosite 下载失败，honk 用回包内 v2fly 版"
     rm -f files/usr/share/v2ray/geosite.dat
 fi
     URL=$(curl -s https://api.github.com/repos/vernesong/OpenClash/releases/latest \
