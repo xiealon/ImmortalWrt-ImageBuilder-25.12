@@ -184,6 +184,21 @@ fi
 # 唯一允许「删了重装」的包（05-rebuild.sh），而重装会冲掉 /etc/config/adblock，
 # 所以判定和修复必须分两套，不能和代理内核那种「只判包级」的混在一起。
 # 排在应用包之后：restore.sh 的 01-pkg 也会 apk add，串行避免包管理器锁冲突。
+# ---- 阶段【清单兜底】：按 manifest.txt 补齐（2026-11-18 加）----
+# 前面的恢复链都按「名单分组」走（应用 / 依赖文件 / adblock），名单之外的包会漏：
+# 实测删掉 luci-app-smartdns、luci-app-crowdsec-firewall-bouncer、luci-i18n-daed-zh-cn
+# 后，各步都报「齐全」，实际永远装不回。
+# manifest.txt 是「本固件该装 ∩ 库里有包」的完整交集（构建时生成），
+# 跑一遍 --all 就兜住所有漏项，不用再逐个往分组里加名字。
+PCR=/rom/usr/sbin/pkg-cache-restore.sh
+if [ -x "$PCR" ]; then
+    _run_capped 180 /bin/sh "$PCR" --all >>"$LOG" 2>&1
+    _pcr_rc=$?
+    echo "[$(date '+%F %T')] 【清单兜底】按 manifest 补齐（rc=$_pcr_rc，详见上方日志）" >>"$LOG"
+else
+    echo "[$(date '+%F %T')] 【清单兜底】未找到 $PCR，跳过" >>"$LOG"
+fi
+
 ADB_RESTORE=/rom/usr/sbin/adblock/restore.sh
 if [ -x "$ADB_RESTORE" ]; then
     _run_capped 20 /bin/sh "$ADB_RESTORE" --check >/dev/null 2>&1
