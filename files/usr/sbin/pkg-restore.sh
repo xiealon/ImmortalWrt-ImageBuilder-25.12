@@ -143,6 +143,14 @@ _pr_pkg() {
         log "包级装回：$_p1（包管理器记账已同步）"
         return 0
     fi
+    # 【2026-11-18】偶发失败重试一次：bootstrap 与 rc.local 两条恢复链可能同时调 apk，
+    # 数据库锁冲突会报「本地包库没有它，或包管理器不可用」。
+    # 实测 lxc-unshare / lxc-usernsexec / lxc-wait 就是这么假失败的（包其实在库、重跑即成功）。
+    sleep 2
+    if "$RESTORE_BIN" "$_p1" >/dev/null 2>&1; then
+        log "包级装回（重试成功）：$_p1"
+        return 0
+    fi
     log "恢复失败：$_p1（本地包库没有它，或包管理器不可用）"
     return 1
 }
