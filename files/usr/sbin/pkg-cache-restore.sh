@@ -111,6 +111,16 @@ _pcr_install() {
         rm -f "$_pcr_repos"
         return 0
     fi
+    # 【2026-11-18】apk add 有时「装上了但返回非 0」：依赖包本身已装、但它的版本不在
+    # 本地索引里（索引只有 1311 个包），apk 会把「依赖不可从任何仓库获取」算成失败，
+    # 文件却已经解包落盘。实测 luci-app-smartdns / luci-i18n-daed-zh-cn /
+    # luci-app-crowdsec-firewall-bouncer(+i18n) 全部如此：报「恢复失败」，实际已装。
+    # 只认返回码会让日志说谎，还会白跑一次联网回退。这里以「实际装没装」为准。
+    if pcl_installed "$_pcr_p"; then
+        pcl_log "本地源装回（apk 返回非 0 但已装）：$_pcr_p"
+        rm -f "$_pcr_repos"
+        return 0
+    fi
     # 本地库只收应用包（实测 114 个），系统依赖（conntrack / iw / zoneinfo-all
     # 这类）不在里面，只能走系统已配置的全部源补 —— 这一句会联网，日志写清楚，
     # 免得事后把「恢复时连过网」当成异常。
