@@ -42,6 +42,7 @@ apk_fixname() {
     else
       nb=$(printf '%s' "$base" \
         | sed -E 's/-(x86_64|aarch64_[a-z0-9_]+|arm_[a-z0-9_-]+|i386_pentium4|mips[a-z0-9_]*)$//' \
+        | sed -E 's/_(x86_64|aarch64_[a-z0-9_]+|arm_[a-z0-9_-]+|i386_pentium4|mips[a-z0-9_]*)$//' \
         | sed -E 's/([0-9]{4}\.[0-9]{2}\.[0-9]{2})\./\1~/')
       want="$nb.apk"
     fi
