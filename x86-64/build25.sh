@@ -936,7 +936,17 @@ if [ -n "$_AK_DL" ]; then
             if _ak_dl "$_ak_u/$_ak_fn" "$_AK_DIR/$_ak_fn"; then
                 _ak_b=$((_ak_b + 1))
             else
-                _ak_miss="$_ak_miss $_ak_nm"
+                # 2026-11-18: index.json 的键是源包名，落盘文件名可能带 soname 数字。
+                # 实测 base feed: libpcap-1.10.6-r1.apk 是 404,
+                #                 libpcap1-1.10.6-r1.apk 是 200 (120,027 B)。
+                # 所以直取失败后再用 <name>1-<ver>.apk 试一次，命中就记一笔。
+                _ak_alt="${_ak_nm}1-$_ak_ver.apk"
+                if _ak_dl "$_ak_u/$_ak_alt" "$_AK_DIR/$_ak_alt"; then
+                    _ak_b=$((_ak_b + 1))
+                    echo "==> [apk-cache] 别名命中: $_ak_nm -> $_ak_alt"
+                else
+                    _ak_miss="$_ak_miss $_ak_nm"
+                fi
             fi
         done
     done
