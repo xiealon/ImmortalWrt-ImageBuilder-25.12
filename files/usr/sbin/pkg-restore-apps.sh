@@ -156,7 +156,9 @@ _PA_OC="luci-app-openclash"
 _PA_CERT="acme-acmesh acme-common luci-app-acme luci-i18n-acme-zh-cn"
 _PA_DDNS="ddns-go luci-app-ddns-go luci-i18n-ddns-go-zh-cn"
 # 穿透/隧道工具（nps 客户端、cloudflare tunnel、tailscale）
-_PA_TOOLS="npc luci-app-nps luci-i18n-nps-zh-cn cloudflared luci-app-cloudflared luci-i18n-cloudflared-zh-cn tailscale luci-app-tailscale-community luci-i18n-tailscale-community-zh-cn"
+# 穿透/隧道工具：主包 + 直接依赖都列进来（实测 apk info -a），
+# 这样 --check 能同时发现「主包没了」与「依赖缺了」，--repair 一次装齐。
+_PA_TOOLS="npc luci-app-nps luci-i18n-nps-zh-cn cloudflared luci-app-cloudflared luci-i18n-cloudflared-zh-cn tailscale luci-app-tailscale-community luci-i18n-tailscale-community-zh-cn ca-bundle wget-ssl luci-compat luci-lua-runtime luci-base ip kmod-tun"
 # 【2026-11-18】OpenClash 的内核与 geo 数据不是包内容：build25.sh 把
 # clash_meta / GeoIP.dat / GeoSite.dat 直接写进 files/etc/openclash/ 带进固件。
 # 于是「包在册」不等于「内核在」——这三个文件被删，主界面照样打不开。
