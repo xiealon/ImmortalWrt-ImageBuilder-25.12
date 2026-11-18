@@ -205,18 +205,31 @@ fi
 # 【v.108.71】SSR Plus → Clashoo（与 build24.sh 同一个理由）。
 # clashoo 的 apk 自带 mihomo（Provides: mihomo, clash-meta），不再单独下内核；
 # 改成断言 xiealon/apk 的 run/x86/clashoo/ 里那三个 apk 真的进了 packages/。
-if echo "$PACKAGES" | grep -q "clashoo"; then
-    _cl_apk=$(ls packages/clashoo-*.apk 2>/dev/null | head -n1)
-    _cl_luci=$(ls packages/luci-app-clashoo-*.apk 2>/dev/null | head -n1)
-    if [ -z "$_cl_apk" ] || [ -z "$_cl_luci" ]; then
-        echo "::error::PACKAGES 里选了 clashoo，但 packages/ 下缺包（clashoo=$_cl_apk luci=$_cl_luci）—— apk 仓库的 run 没解出 apk"
+# [2026-11-18] clashoo -> nikki; ssr-plus as fallback.
+# nikki and clashoo both provide mihomo, so only one may be shipped.
+if echo "$PACKAGES" | grep -q "nikki"; then
+    _nk_apk=$(ls packages/nikki-*.apk 2>/dev/null | head -n1)
+    _nk_luci=$(ls packages/luci-app-nikki-*.apk 2>/dev/null | head -n1)
+    if [ -z "$_nk_apk" ] || [ -z "$_nk_luci" ]; then
+        echo "::error::PACKAGES 里选了 nikki，但 packages/ 缺包（nikki=$_nk_apk luci=$_nk_luci）—— run 包没解出 apk"
         ls -la packages/ 2>/dev/null || true
-        echo "::error::预期来自 xiealon/apk 的 run/x86/clashoo/"
         exit 1
     fi
-    echo "✅ clashoo 就位: $_cl_apk + $_cl_luci（自带 mihomo 内核，不再单独下载）"
+    echo "OK nikki: $_nk_apk + $_nk_luci (ships mihomo)"
 else
-    echo "⚪️ 未选择 clashoo"
+    echo "SKIP nikki: not selected"
+fi
+# ssr-plus fallback: its own apks never exist in official feeds, must come from run packages
+if echo "$PACKAGES" | grep -q "ssr-plus"; then
+    _sp_n=0
+    for _sp_p in luci-app-ssr-plus xray-core shadowsocksr-libev-ssr-local shadowsocksr-libev-ssr-redir; do
+        if ls "packages/$_sp_p"-*.apk >/dev/null 2>&1; then
+            _sp_n=$((_sp_n + 1))
+        else
+            echo "::warning::ssr-plus fallback missing: $_sp_p (official feeds never carry it)"
+        fi
+    done
+    echo "OK ssr-plus fallback: $_sp_n/4 apks ready"
 fi
 
 REPOS_CONF="/home/build/immortalwrt/repositories"
@@ -722,6 +735,11 @@ for _f in packages/*.apk; do
         continue
         ;;
     rtp2httpd-* | luci-app-rtp2httpd-* | luci-i18n-rtp2httpd-zh-cn-*)
+        _ak_skip_stale="$_ak_skip_stale ${_f##*/}"
+        continue
+        ;;
+    # [2026-11-18] clashoo replaced by nikki: keep it out of the local library
+    clashoo-* | luci-app-clashoo-* | luci-i18n-clashoo-zh-cn-*)
         _ak_skip_stale="$_ak_skip_stale ${_f##*/}"
         continue
         ;;
