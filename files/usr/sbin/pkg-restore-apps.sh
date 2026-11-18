@@ -151,7 +151,10 @@ _RESTORE="${RESTORE_BIN:-$SROOT/usr/sbin/pkg-restore.sh}"
 #                      固件库无、包库有 → _pa_should 判「固件未带」，永远跳过
 #   libopenssl3        固件库有、包库无 → 装不回；且它是全系统的 TLS 底座，
 #                      不属于某一个应用的依赖
-_PA_CLASHOO="clashoo luci-app-clashoo luci-i18n-clashoo-zh-cn"
+_PA_NIKKI="nikki luci-app-nikki luci-i18n-nikki-zh-cn"
+# [2026-11-18] clashoo -> nikki. ssr-plus is the fallback when nikki fails.
+# nikki and clashoo both provide mihomo: mutually exclusive, firmware ships nikki only.
+_PA_SSRP="luci-app-ssr-plus luci-i18n-ssr-plus-zh-cn xray-core shadowsocksr-libev-ssr-local shadowsocksr-libev-ssr-redir"
 # 【2026-11-10】官方线改用 daed（用户定），保护组整体换过来，三件：
 #   daed          主程序，/usr/bin/daed + /etc/init.d/daed，内嵌 Web UI
 #   luci-app-daede LuCI 界面（kenzok8 的 1.15-r13，自带中文，没有单独 i18n 包）
@@ -189,7 +192,7 @@ _PA_COMMON="sing-box"
 # 结论：这三个组只走 _pa_installed（apk info -e），文件级一律放行。
 # 二进制真被删了，重装包自然连文件一起回来；配置文件不被任何自动动作碰。
 _PA_HONK="honk luci-app-honk luci-i18n-honk-zh-cn"
-_PA_PKGONLY="$_PA_CLASHOO $_PA_DAED $_PA_HONK"
+_PA_PKGONLY="$_PA_NIKKI $_PA_SSRP $_PA_DAED $_PA_HONK"
 
 # 【2026-11-02】daed 在 25.12 线已被 honk 取代（用户定），原来的 geo 软链接判据一并删除：
 #   honk 的规则集不走 /usr/share/daed/*.dat 软链接，而是按 native_api.geosite_download_url /
@@ -200,7 +203,7 @@ _PA_PKGONLY="$_PA_CLASHOO $_PA_DAED $_PA_HONK"
 # 【2026-11-10】_PA_HONK 并入清单：_PA_PKGONLY 原本写了 honk 三包却不进 _PA_LIST，
 # 等于「判据写了、范围没进去」，只有 honk 变体才该有这三个包，靠 _pa_should 按
 # /rom/lib/apk/db/installed 的 P: 行过滤 —— 纯净 25.12 / daed 线上自动跳过，不误报。
-_PA_LIST="${CS_PROBE_APPS:-$_PA_CLASHOO $_PA_GEO $_PA_DAED $_PA_COMMON $_PA_HONK}"
+_PA_LIST="${CS_PROBE_APPS:-$_PA_NIKKI $_PA_SSRP $_PA_GEO $_PA_DAED $_PA_COMMON $_PA_HONK}"
 
 log() { printf '[APP] %s\n' "$*"; }
 
