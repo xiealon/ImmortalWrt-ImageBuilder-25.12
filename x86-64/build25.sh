@@ -190,17 +190,21 @@ fi
 # 改成断言 xiealon/apk 的 run/x86/clashoo/ 里那三个 apk 真的进了 packages/。
 # [2026-11-18] clashoo -> nikki; ssr-plus as fallback.
 # nikki and clashoo both provide mihomo, so only one may be shipped.
-if echo "$PACKAGES" | grep -q "nikki"; then
-    _nk_apk=$(ls packages/nikki-*.apk 2>/dev/null | head -n1)
-    _nk_luci=$(ls packages/luci-app-nikki-*.apk 2>/dev/null | head -n1)
-    if [ -z "$_nk_apk" ] || [ -z "$_nk_luci" ]; then
-        echo "::error::PACKAGES 里选了 nikki，但 packages/ 缺包（nikki=$_nk_apk luci=$_nk_luci）—— run 包没解出 apk"
+if echo "$PACKAGES" | grep -q "luci-app-openclash"; then
+    _oc_apk=$(ls packages/luci-app-openclash-*.apk 2>/dev/null | head -n1)
+    _oc_core=files/etc/openclash/core/clash_meta
+    if [ -z "$_oc_apk" ]; then
+        echo "::error::PACKAGES 里选了 luci-app-openclash，但 packages/ 里没有它的 apk（上游 release 抓取失败？）"
         ls -la packages/ 2>/dev/null || true
         exit 1
     fi
-    echo "OK nikki: $_nk_apk + $_nk_luci (ships mihomo)"
+    if [ ! -s "$_oc_core" ]; then
+        echo "::error::OpenClash 缺内核：$_oc_core 不存在（上面那段 core 下载失败）"
+        exit 1
+    fi
+    echo "OK openclash: $_oc_apk + core $(du -h "$_oc_core" | cut -f1)"
 else
-    echo "SKIP nikki: not selected"
+    echo "SKIP openclash: not selected"
 fi
 # ssr-plus fallback: its own apks never exist in official feeds, must come from run packages
 if echo "$PACKAGES" | grep -q "ssr-plus"; then
@@ -681,7 +685,7 @@ adblock luci-app-adblock luci-i18n-adblock-zh-cn
 geoview
 daed
 coreutils-stat coreutils-nohup sqlite3-cli
-coreutils-base64 curl dnsmasq-full ip-full jq libuci-lua luci-compat luci-lua-runtime lyaml microsocks nping resolveip unzip xz-utils libc libev libsodium libudns libpcap libpcap1 libyaml coreutils-stty script-utils"
+coreutils-base64 curl dnsmasq-full ip-full jq libuci-lua luci-compat luci-lua-runtime lyaml microsocks nping resolveip unzip xz-utils libc libev libsodium libudns libpcap libpcap1 libyaml coreutils-stty script-utils ruby ruby-yaml"
 
 # 来源 A：packages/ 里 run 包解出的 apk（第三方包，官方源没有）
 #
