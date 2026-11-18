@@ -654,7 +654,7 @@ v2ray-geoip v2ray-geosite sing-box
 geoview
 adblock luci-app-adblock luci-i18n-adblock-zh-cn
 coreutils-stat coreutils-nohup sqlite3-cli
-coreutils-base64 curl dnsmasq-full ip-full jq libuci-lua luci-compat luci-lua-runtime lyaml microsocks nping resolveip unzip xz-utils libc"
+coreutils-base64 curl dnsmasq-full ip-full jq libuci-lua luci-compat luci-lua-runtime lyaml microsocks nping resolveip unzip xz-utils libc libev libsodium libudns libpcap1 libyaml"
 
 # 来源 A：packages/ 里 run 包解出的 apk（第三方包，官方源没有）
 #
