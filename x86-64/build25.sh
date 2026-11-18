@@ -685,7 +685,7 @@ adblock luci-app-adblock luci-i18n-adblock-zh-cn
 geoview
 daed
 coreutils-stat coreutils-nohup sqlite3-cli
-coreutils-base64 curl dnsmasq-full ip-full jq libuci-lua luci-compat luci-lua-runtime lyaml microsocks nping resolveip unzip xz-utils libc libev libsodium libudns libpcap libpcap1 libyaml coreutils-stty script-utils ruby ruby-yaml"
+coreutils-base64 curl dnsmasq-full ip-full jq libuci-lua luci-compat luci-lua-runtime lyaml microsocks nping resolveip unzip xz-utils libc libev libsodium libudns libpcap libpcap1 libyaml coreutils-stty script-utils ruby ruby-yaml btrfs-progs ca-certificates cgi-io containerd docker docker-compose dockerd iptables-mod-extra libattr libblkid1 libblobmsg-json20260213 libcap libgcc1 libjson-c5 liblucihttp-ucode liblucihttp0 liblzo2 libmount1 libnl-tiny1 libopenssl3 libpthread librt libseccomp libubox20260213 libubus20251202 libuci20250120 libucode20230711 libuuid1 libuv1 libwebsockets-full libxtables12 luci-app-dockerman luci-base luci-i18n-dockerman-zh-cn rpcd rpcd-mod-file rpcd-mod-luci rpcd-mod-ucode runc tini ttyd ucode ucode-mod-fs ucode-mod-html ucode-mod-log ucode-mod-math ucode-mod-socket ucode-mod-ubus ucode-mod-uci zlib"
 
 # 来源 A：packages/ 里 run 包解出的 apk（第三方包，官方源没有）
 #
