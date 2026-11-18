@@ -20,7 +20,7 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-rtp2httpd luci-i18n-rtp2httpd-zh-cn"
 # 显式列出是为了让「缺包」在构建期就暴露，而不是靠依赖解析碰运气。
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES honk luci-app-honk"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES geoview sing-box luci-compat kmod-tun kmod-inet-diag kmod-nft-tproxy kmod-nft-socket bash curl lua unzip"
-CUSTOM_PACKAGES="$CUSTOM_PACKAGES nikki luci-app-nikki luci-i18n-nikki-zh-cn"
+CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-openclash"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-ssr-plus luci-i18n-ssr-plus-zh-cn xray-core"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES shadowsocksr-libev-ssr-local shadowsocksr-libev-ssr-redir"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES -dnsmasq dnsmasq-full"
