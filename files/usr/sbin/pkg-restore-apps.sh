@@ -159,7 +159,7 @@ _PA_CLASHOO="clashoo luci-app-clashoo luci-i18n-clashoo-zh-cn"
 # 三件都在包库 /rom/root/apk-cache 里 —— build25.sh 的 daed 段下载、
 # 构建期断言 _ak_need_daed 也会在打包前核实一遍，所以探针判出缺失时
 # 能从本地装回，不需要联网。
-_PA_DAED="daed luci-app-daede vmlinux-btf"
+_PA_DAED="daed luci-app-daed daed-geoip daed-geosite vmlinux-btf"
 # 【2026-11-02】geo 数据单独成组：包级判据（apk info -e），不判文件。
 #
 # 这一组负责的只是「包被人 apk del 掉」——装回时连文件带记账一起回来。
