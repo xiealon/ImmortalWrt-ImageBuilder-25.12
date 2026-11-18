@@ -57,7 +57,9 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-ddns-go-zh-cn"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-timewol-zh-cn"
 
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-3ginfo-lite-zh-cn"
-CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-acme-zh-cn"
+# 【2026-11-18】lucky 替代 acme（用户定）：lucky 自带证书申请/续期，
+# 另有反代、端口转发、DDNS、Web 服务；acme 整条栈本来是被上面那行 i18n 拉进来的。
+CUSTOM_PACKAGES="$CUSTOM_PACKAGES lucky luci-app-lucky luci-i18n-lucky-zh-cn"
 # 【2026-11-02】adblock：先留着（用户当日改回）。
 # 这条链是 i18n → luci-app-adblock → adblock，写一行三个全装，imm25.config 里
 # CONFIG_PACKAGE_adblock / CONFIG_PACKAGE_luci-app-adblock 都是 not set，
