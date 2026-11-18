@@ -124,14 +124,15 @@ _pcr_install() {
     # 本地库只收应用包（实测 114 个），系统依赖（conntrack / iw / zoneinfo-all
     # 这类）不在里面，只能走系统已配置的全部源补 —— 这一句会联网，日志写清楚，
     # 免得事后把「恢复时连过网」当成异常。
-    pcl_log "本地库解不了 $_pcr_p 的依赖，改走系统源（会联网）"
-    if apk add --allow-untrusted "$_pcr_p" >/dev/null 2>&1; then
-        pcl_log "系统源装回：$_pcr_p"
-        rm -f "$_pcr_repos"
-        return 0
-    fi
+    # 【2026-11-18 用户定】删掉「改走系统源（会联网）」这一步：自愈只认 /rom 本地库。
+    # 理由：开机联网装包会拖慢启动、掩盖「库缺包」这个真问题，日志里还留一条
+    # 说不清的联网记录。库缺了就如实报缺哪个依赖，靠补白名单 + 重刷解决。
+    _pcr_missdep="$(apk add --simulate --allow-untrusted \
+        --repositories-file "$_pcr_repos" "$_pcr_p" 2>&1 \
+        | grep -oE '[A-Za-z0-9][A-Za-z0-9.+_-]* \(no such package\)' \
+        | sed 's/ (no such package)//' | sort -u | tr '\n' ' ')"
     rm -f "$_pcr_repos"
-    pcl_log "恢复失败：$_pcr_p（本地库与系统源都没有它）"
+    pcl_log "恢复失败：$_pcr_p（本地库缺依赖：${_pcr_missdep:-未知}；不联网，需补白名单后重刷）"
     return 1
 }
 
