@@ -204,11 +204,13 @@ if echo "$PACKAGES" | grep -q "luci-app-openclash"; then
 # geoip 仍用包里的 v2fly（18.3 MB，含 telegram 等特殊码，实测无告警）。
 mkdir -p files/usr/share/v2ray
 LG_GEOSITE="https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat"
-if wget -q "$LG_GEOSITE" -O files/usr/share/v2ray/geosite.dat; then
-    echo "✅ honk geosite 已换 Loyalsoldier：$(stat -c%s files/usr/share/v2ray/geosite.dat) B"
+LG_GEOIP="https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat"
+if wget -q "$LG_GEOSITE" -O files/usr/share/v2ray/geosite.dat \
+   && wget -q "$LG_GEOIP" -O files/usr/share/v2ray/geoip.dat; then
+    echo "✅ honk geo 已换 Loyalsoldier：geosite $(stat -c%s files/usr/share/v2ray/geosite.dat) B / geoip $(stat -c%s files/usr/share/v2ray/geoip.dat) B"
 else
-    echo "::warning::Loyalsoldier geosite 下载失败，honk 用回包内 v2fly 版"
-    rm -f files/usr/share/v2ray/geosite.dat
+    echo "::warning::Loyalsoldier geo 下载失败，honk 用回包内 v2fly 版"
+    rm -f files/usr/share/v2ray/geosite.dat files/usr/share/v2ray/geoip.dat
 fi
     URL=$(curl -s https://api.github.com/repos/vernesong/OpenClash/releases/latest \
       | grep "browser_download_url.*apk" \
