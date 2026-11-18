@@ -20,7 +20,10 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-rtp2httpd luci-i18n-rtp2httpd-zh-cn"
 # 显式列出是为了让「缺包」在构建期就暴露，而不是靠依赖解析碰运气。
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES honk luci-app-honk"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES geoview sing-box luci-compat kmod-tun kmod-inet-diag kmod-nft-tproxy kmod-nft-socket bash curl lua unzip"
-CUSTOM_PACKAGES="$CUSTOM_PACKAGES clashoo luci-app-clashoo luci-i18n-clashoo-zh-cn"
+CUSTOM_PACKAGES="$CUSTOM_PACKAGES nikki luci-app-nikki luci-i18n-nikki-zh-cn"
+CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-ssr-plus luci-i18n-ssr-plus-zh-cn xray-core"
+CUSTOM_PACKAGES="$CUSTOM_PACKAGES shadowsocksr-libev-ssr-local shadowsocksr-libev-ssr-redir"
+CUSTOM_PACKAGES="$CUSTOM_PACKAGES -dnsmasq dnsmasq-full"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES yq kmod-dummy ca-bundle"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-taskplan luci-i18n-taskplan-zh-cn"
 # 【2026-11-02】mosdns 移除（用户定：DNS 只留 smartdns + adblock 这条链）。
