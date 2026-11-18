@@ -666,7 +666,8 @@ luci-i18n-crowdsec-firewall-bouncer-zh-cn nftables-json
 v2ray-geoip v2ray-geosite sing-box
 adblock luci-app-adblock luci-i18n-adblock-zh-cn
 geoview
-daed"
+daed
+coreutils-stat coreutils-nohup sqlite3-cli"
 
 # 来源 A：packages/ 里 run 包解出的 apk（第三方包，官方源没有）
 #
