@@ -49,7 +49,6 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-openvpn-zh-cn"
 # 不必动 imm25.config（CONFIG_PACKAGE_zerotier 本来就是 not set）。
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-proto-wireguard"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-tailscale-community luci-i18n-tailscale-community-zh-cn"
-CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-ddns-go-zh-cn"
 # 【2026-11-02】xfrpc 移除（用户定）。xfrpc 是 frp 客户端，必须自己有公网 VPS
 # 才能用；与 nps/npc 属同类（都是「自建中转」），二选一留 nps。
 # nps 带 Web 管理面板 + SOCKS5，服务端放 VPS、客户端 npc 放本机，功能比 frp 全。
@@ -59,6 +58,8 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-timewol-zh-cn"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-3ginfo-lite-zh-cn"
 # 【2026-11-18】lucky 替代 acme（用户定）：lucky 自带证书申请/续期，
 # 另有反代、端口转发、DDNS、Web 服务；acme 整条栈本来是被上面那行 i18n 拉进来的。
+# 【2026-11-18】ddns-go 去掉（用户定）：DDNS 与证书统一交给 lucky，
+# 省掉一套 DNS API 凭据与一个常驻进程。实测 ddns-go enabled=0、从无配置。
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES lucky luci-app-lucky luci-i18n-lucky-zh-cn"
 # 【2026-11-02】adblock：先留着（用户当日改回）。
 # 这条链是 i18n → luci-app-adblock → adblock，写一行三个全装，imm25.config 里
