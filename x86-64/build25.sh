@@ -721,7 +721,7 @@ liblucihttp-lua liblucihttp libmnl libncurses libnetfilter-conntrack libnettle l
 libnl-tiny libopenssl libreadline libubox libubus-lua libubus libuci libucode
 lua luci-lib-base luci-lib-ip luci-lib-jsonc luci-lib-nixio ruby-bigdecimal ruby-date ruby-digest
 ruby-enc ruby-pstore ruby-psych ruby-stringio terminfo ucode-mod-lua liblua5.1 libnghttp2
-libruby"
+libruby acme-acmesh acme-common luci-app-acme luci-i18n-acme-zh-cn ddns-go luci-app-ddns-go luci-i18n-ddns-go-zh-cn openssl-util socat wget-ssl"
 
 # 来源 A：packages/ 里 run 包解出的 apk（第三方包，官方源没有）
 #
