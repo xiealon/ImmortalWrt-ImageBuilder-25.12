@@ -643,22 +643,26 @@ mkdir -p "$_AK_DIR"
 #
 # 注意：下面是**双引号字符串**，注释只能写在起始引号之前。写在里面的 `#`
 # 不是注释，会被当成包名的一部分（v.180.167 踩过这个坑）。
-_AK_WANT="lxc lxc-attach lxc-auto lxc-autostart lxc-cgroup lxc-checkconfig lxc-common
-lxc-config lxc-configs lxc-console lxc-copy lxc-create lxc-destroy lxc-device
-lxc-execute lxc-freeze lxc-hooks lxc-info lxc-init lxc-ls lxc-monitor
-lxc-snapshot lxc-start lxc-stop lxc-templates lxc-top lxc-unfreeze
-lxc-unshare lxc-usernsexec lxc-wait liblxc rpcd-mod-lxc
-luci-app-lxc luci-i18n-lxc-zh-cn
-smartdns luci-app-smartdns
-mosdns
-daed daed-geoip daed-geosite luci-app-daed luci-i18n-daed-zh-cn
-crowdsec-firewall-bouncer luci-app-crowdsec-firewall-bouncer
-luci-i18n-crowdsec-firewall-bouncer-zh-cn nftables-json
-v2ray-geoip v2ray-geosite sing-box
-geoview
-adblock luci-app-adblock luci-i18n-adblock-zh-cn
-coreutils-stat coreutils-nohup sqlite3-cli
-coreutils-base64 curl dnsmasq-full ip-full jq libuci-lua luci-compat luci-lua-runtime lyaml microsocks nping resolveip unzip xz-utils libc libev libsodium libudns libpcap libpcap1 libyaml coreutils-stty script-utils ruby ruby-yaml btrfs-progs ca-certificates cgi-io containerd docker docker-compose dockerd iptables-mod-extra libattr libblkid1 libblobmsg-json20260213 libcap libgcc1 libjson-c5 liblucihttp-ucode liblucihttp0 liblzo2 libmount1 libnl-tiny1 libopenssl3 libpthread librt libseccomp libubox20260213 libubus20251202 libuci20250120 libucode20230711 libuuid1 libuv1 libwebsockets-full libxtables12 luci-app-dockerman luci-base luci-i18n-dockerman-zh-cn rpcd rpcd-mod-file rpcd-mod-luci rpcd-mod-ucode runc tini ttyd ucode ucode-mod-fs ucode-mod-html ucode-mod-log ucode-mod-math ucode-mod-socket ucode-mod-ubus ucode-mod-uci zlib"
+_AK_WANT="lxc lxc-attach lxc-auto lxc-autostart lxc-cgroup lxc-checkconfig lxc-common lxc-config
+lxc-configs lxc-console lxc-copy lxc-create lxc-destroy lxc-device lxc-execute lxc-freeze
+lxc-hooks lxc-info lxc-init lxc-ls lxc-monitor lxc-snapshot lxc-start lxc-stop
+lxc-templates lxc-top lxc-unfreeze lxc-unshare lxc-usernsexec lxc-wait liblxc rpcd-mod-lxc
+luci-app-lxc luci-i18n-lxc-zh-cn smartdns luci-app-smartdns mosdns daed daed-geoip daed-geosite
+luci-app-daed luci-i18n-daed-zh-cn crowdsec-firewall-bouncer luci-app-crowdsec-firewall-bouncer luci-i18n-crowdsec-firewall-bouncer-zh-cn nftables-json v2ray-geoip v2ray-geosite
+sing-box geoview adblock luci-app-adblock luci-i18n-adblock-zh-cn coreutils-stat coreutils-nohup sqlite3-cli
+coreutils-base64 curl dnsmasq-full ip-full jq libuci-lua luci-compat luci-lua-runtime
+lyaml microsocks nping resolveip unzip xz-utils libc libev
+libsodium libudns libpcap libyaml coreutils-stty script-utils ruby ruby-yaml
+btrfs-progs ca-certificates cgi-io containerd docker docker-compose dockerd iptables-mod-extra
+libattr libcap liblucihttp-ucode libpthread librt libseccomp libwebsockets-full luci-app-dockerman
+luci-base luci-i18n-dockerman-zh-cn rpcd rpcd-mod-file rpcd-mod-luci rpcd-mod-ucode runc tini
+ttyd ucode ucode-mod-fs ucode-mod-html ucode-mod-log ucode-mod-math ucode-mod-socket ucode-mod-ubus
+ucode-mod-uci zlib bash ca-bundle jansson libblobmsg-json libbpf libcurl
+libelf libgcc libgmp libjson-c liblucihttp-lua liblucihttp libmnl libncurses
+libnetfilter-conntrack libnettle libnfnetlink libnftnl libnl-tiny libopenssl libreadline libubox
+libubus-lua libubus libuci libucode lua luci-lib-base luci-lib-ip luci-lib-jsonc
+luci-lib-nixio ruby-bigdecimal ruby-date ruby-digest ruby-enc ruby-pstore ruby-psych ruby-stringio
+terminfo ucode-mod-lua liblua5.1 libnghttp2 libruby"
 
 # 来源 A：packages/ 里 run 包解出的 apk（第三方包，官方源没有）
 #
