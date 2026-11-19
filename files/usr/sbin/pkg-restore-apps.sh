@@ -252,12 +252,21 @@ _pa_kmods() {
 _PA_BOOT_APPS="luci-app-3ginfo-lite luci-app-aria2 luci-app-cifs-mount luci-app-diskman luci-app-email luci-app-filemanager luci-app-firewall luci-app-hd-idle luci-app-ksmbd luci-app-nfs luci-app-openvpn luci-app-p910nd luci-app-package-manager luci-app-partexp luci-app-rtp2httpd luci-app-sqm luci-app-taskplan luci-app-timewol luci-app-ttyd luci-app-uhttpd luci-app-upnp luci-app-wechatpush"
 
 # 开机补充组里「该有却没有」的（只给 --repair 用）
+# 【2026-11-19 修⑩】补丁：装回一个 luci-app 时，它的中文包（luci-i18n-<x>-zh-cn）
+# 不会被 apk 连带装上（i18n 依赖 app，反过来不成立）。真机实测：删
+# luci-app-partexp + luci-i18n-partexp-zh-cn 后 --repair 只装回 app，包数 613 而不是 614。
+# 所以这里按名字规则把同名 i18n 一起判、一起装。
+_pa_boot_i18n() {
+    printf '%s\n' "$1" | sed 's/^luci-app-/luci-i18n-/; s/$/-zh-cn/'
+}
 _pa_missing_boot() {
     _pa_mbo=""
     for _pa_p in $_PA_BOOT_APPS; do
-        _pa_should "$_pa_p" || continue
-        if _pa_installed "$_pa_p" && _pa_files_ok "$_pa_p"; then continue; fi
-        _pa_mbo="$_pa_mbo $_pa_p"
+        for _pa_c in "$_pa_p" "$(_pa_boot_i18n "$_pa_p")"; do
+            _pa_should "$_pa_c" || continue
+            if _pa_installed "$_pa_c" && _pa_files_ok "$_pa_c"; then continue; fi
+            _pa_mbo="$_pa_mbo $_pa_c"
+        done
     done
     printf '%s\n' "$_pa_mbo" | sed 's/^ *//'
 }
