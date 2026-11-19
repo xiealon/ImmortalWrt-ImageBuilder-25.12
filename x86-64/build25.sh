@@ -932,43 +932,32 @@ _AK_AWK="${_AK_AWK:-awk}"
 # 做法：写一个只含官方源的临时 repositories 文件，apk update 后 list --available，
 # 得到权威的 "<name>-<ver>" 列表；下载时按该名去各 feed 试，命中即止。
 _ak_avail=/tmp/ak-avail.txt
-_ak_feedlist=/tmp/ak-feedlist.txt
-_ak_cache=/tmp/ak-cache
-_ak_updlog=/tmp/ak-update.log
+_ak_idxadb=/tmp/ak-idx.adb
 : > "$_ak_avail"
 if [ -n "$_AK_BIN" ]; then
-    : > "$_ak_feedlist"
+    # 【2026-11-19 修③ · run #127/#128 两次实证后定稿】彻底不用 apk update。
+    # 它在 GitHub runner（普通用户、无 /etc/apk/keys、无 /lib/apk/db）里必挂，两次报错分别是：
+    #   ERROR: Unable to open log: Permission denied      ← 想写 /var/log/apk.log
+    #   ERROR: Unable to lock database: No such file...    ← 想开 /lib/apk/db
+    # 加 --allow-untrusted / --logfile=no / --cache-dir 都只是把问题往后推一格。
+    # 真正的信息源本来就有：官方每个 feed 的 packages.adb 里写着「真名 + 版本」，
+    # 而文件名就是 <真名>-<版本>.apk（真名带 soname：libubox20260213 / libxml2-16 /
+    # libruby3.4 / libnl200 / libstdcpp6 …）。index.json 只有别名（libubox），没有真名。
+    # apk adbdump 只读一个文件、不碰 db 和日志，在 runner 里可用（与 mkndx 同类）：
+    #   - name: libubox20260213
+    #     version: 2026.06.19~7dd12784-r1
+    # 201 实测：6 个 feed 拼出 10419 行快照（与 apk list --available 完全同数量，10419），
+    # 45 个缺单全部解析出唯一真名。
     for _ak_fd0 in $_AK_FEEDS; do
-        echo "$_AK_BASE/$_ak_fd0/packages.adb" >> "$_ak_feedlist"
+        if ! _ak_dl "$_AK_BASE/$_ak_fd0/packages.adb" "$_ak_idxadb" 2>/dev/null; then
+            echo "::warning::取不到 $_ak_fd0/packages.adb，这个 feed 的真名进不了快照"
+            continue
+        fi
+        "$_AK_BIN" --allow-untrusted --logfile=no adbdump "$_ak_idxadb" 2>/dev/null \
+            | awk '/^  - name: /{n=$3} /^    version: /{if(n!=""){print n "-" $2; n=""}}' \
+            >> "$_ak_avail"
     done
-    # 【2026-11-19 修 · 201 实测】上一版不带 --allow-untrusted，在 IB 宿主容器里必失败：
-    # 那里没有 /etc/apk/keys，apk 对每个 feed 报
-    #   WARNING: updating and opening .../packages.adb: UNTRUSTED signature
-    # update 退出码非 0 → if 落到 else → 回退 index.json 猜名 → 45 个库包 404
-    # （jansson / libubox / libxml2 / libruby / libstdcpp / libnl* 全在缺单里）。
-    # 201 实测对照（空 keys 目录）：
-    #   不带 allow-untrusted → 「3 unavailable, 0 stale; 618 distinct packages」
-    #   带  --allow-untrusted → 「OK: 10698 distinct packages available」
-    # 另：--cache-dir 指的目录必须先建好，否则 apk 直接报 "Unable to setup the cache"。
-    # 【2026-11-19 修② · run #127 日志实证】加了 --allow-untrusted 之后仍然失败，
-    # 真实报错只有一行（之前被 2>/dev/null 吞了）：
-    #   ERROR: Unable to open log: Permission denied
-    # apk 3 每次打开数据库都会写 <root>/var/log/apk.log，而 GitHub runner 是普通用户、
-    # /var/log 不可写 → update 直接返回非 0。apk 自带开关：
-    #   --logfile[=BOOL]  If turned off, disables the writing of the log file
-    # 201 实测（/var/log/apk.log 的 mtime+size 对照）：
-    #   不带 → 10:28:52 写、36380→36839 字节
-    #   带 --logfile=no → mtime/size 不变，update 仍 OK: 9669 distinct packages，list 仍出 9375 行
-    mkdir -p "$_ak_cache"
-    if "$_AK_BIN" --allow-untrusted --logfile=no --cache-dir "$_ak_cache" update \
-            --repositories-file "$_ak_feedlist" >"$_ak_updlog" 2>&1; then
-        "$_AK_BIN" --allow-untrusted --logfile=no --cache-dir "$_ak_cache" list --available \
-            --repositories-file "$_ak_feedlist" 2>/dev/null | awk '{print $1}' > "$_ak_avail"
-        echo "==> [apk-cache] 索引快照：$(wc -l < "$_ak_avail") 个可用包（用于真实文件名）"
-    else
-        echo "::error::apk update 失败，只能回退 index.json 猜名（前 8 行原因见下）"
-        sed -n '1,8p' "$_ak_updlog" 2>/dev/null
-    fi
+    echo "==> [apk-cache] 索引快照：$(wc -l < "$_ak_avail") 个可用包（packages.adb 真名，不走 apk update）"
     [ -s "$_ak_avail" ] || \
         echo "::error::索引快照为空 —— 真实文件名拿不到，库内会缺一批带 soname 后缀的库包"
 fi
