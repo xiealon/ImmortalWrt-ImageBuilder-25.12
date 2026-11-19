@@ -2,7 +2,9 @@
 # 【v.180.198】固件版本标记 —— 与 crowdsec-lxc-bootstrap.sh 的 SCRIPT_VER 同步，每次改脚本一起改
 
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-partexp luci-i18n-partexp-zh-cn"
-CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-rtp2httpd luci-i18n-rtp2httpd-zh-cn"
+# 【2026-11-19 用户定】rtp2httpd 大概率用不到 → 从固件撤出，apk 仍留在本地库，
+# 需要时 apk add 即可（luci-app-rtp2httpd / luci-i18n-rtp2httpd-zh-cn）。
+# CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-rtp2httpd luci-i18n-rtp2httpd-zh-cn"
 # 【2026-11-02】lucky 移除（用户定：只去纯重复的，一个功能留一个）。
 # lucky 是全能型（DDNS + 反向代理 + 端口转发 + Web 服务 + SSL 证书），
 # 它的每一项在固件里都已有专用工具且是从没配过的状态：
@@ -186,5 +188,12 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES glib2 crconf davici swanmon kmod-crypto-chacha
 #   无界面的 haproxy / lighttpd / stunnel 已从库中移除；socat 作为依赖保留。
 # nginx（官方 2.4 版本线：1.26.3）：无 LuCI 界面，配置手写。
 # 自带 nginx.conf 覆盖官方缺失，装完 `nginx -t` 即通过，默认不启用。
-CUSTOM_PACKAGES="$CUSTOM_PACKAGES nginx-full nginx-mod-stream nginx-ssl-util"
+# 【2026-11-19 用户定 · A 方案】nginx 三件从固件撤出。
+# 原因（201 实测）：nginx-full 依赖的 nginx-ssl-util 自带 /etc/config/nginx，
+# 里面 _redirect2ssl 监听 80（302→https）、_lan 监听 443 ssl 且 root /www，
+# 一开机就把 80/443 抢走 → uhttpd 绑不上 80 → LuCI 被 nginx 当静态文件找，报
+#   open() "/www/cgi-bin/luci/..." failed (20: Not a directory)
+# 现在改回「uhttpd 独占 80」；nginx 的 apk 仍在本地库（白名单里保留），
+# 要用时 apk add nginx-full nginx-mod-stream nginx-ssl-util 再手写配置。
+# CUSTOM_PACKAGES="$CUSTOM_PACKAGES nginx-full nginx-mod-stream nginx-ssl-util"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES frpc frps luci-app-frpc luci-app-frps luci-i18n-frpc-zh-cn luci-i18n-frps-zh-cn"
