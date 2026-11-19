@@ -734,7 +734,8 @@ libacl libbz2 libcap-ng libcomerr libdbus libe2p libext2fs libf2fs libfdisk libf
 luci-app-3ginfo-lite luci-app-adblock luci-app-cifs-mount luci-app-diskman luci-app-email luci-app-firewall luci-app-hd-idle luci-app-ksmbd luci-app-nfs luci-app-openvpn luci-app-p910nd luci-app-package-manager luci-app-sqm luci-app-timewol luci-app-ttyd luci-app-uhttpd luci-app-upnp luci-app-wechatpush
 bc f2fs-tools f2fsck losetup resize2fs e2fsprogs tune2fs blkid
 p910nd
-gawk coreutils-sort rpcd-mod-rpcsys luci-i18n-adblock-zh-cn luci-app-smartdns luci-i18n-smartdns-zh-cn"
+gawk coreutils-sort rpcd-mod-rpcsys luci-i18n-adblock-zh-cn luci-app-smartdns luci-i18n-smartdns-zh-cn
+luci-i18n-3ginfo-lite-zh-cn luci-i18n-cifs-mount-zh-cn luci-i18n-diskman-zh-cn luci-i18n-email-zh-cn luci-i18n-firewall-zh-cn luci-i18n-hd-idle-zh-cn luci-i18n-ksmbd-zh-cn luci-i18n-nfs-zh-cn luci-i18n-openvpn-zh-cn luci-i18n-p910nd-zh-cn luci-i18n-package-manager-zh-cn luci-i18n-rtp2httpd-zh-cn luci-i18n-sqm-zh-cn luci-i18n-timewol-zh-cn luci-i18n-ttyd-zh-cn luci-i18n-uhttpd-zh-cn luci-i18n-upnp-zh-cn luci-i18n-wechatpush-zh-cn"
 
 # 来源 A：packages/ 里 run 包解出的 apk（第三方包，官方源没有）
 #
