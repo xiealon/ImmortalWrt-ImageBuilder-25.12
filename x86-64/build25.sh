@@ -1169,6 +1169,25 @@ if [ -n "$_ak_miss" ]; then
     echo "::warning::以下包在官方源上没下到（可能已改名或不在 25.12.2 源里）：$_ak_miss"
 fi
 
+# 【2026-11-19 用户定 · C4】luci-app-partexp / luci-app-taskplan 只随 run 包进来
+# （官方 index.json 没有这两个键），之前被当成「改名前的旧包」从库里剔掉，apk del 后装不回。
+# 这里从 packages/ 直接拷进库；拷完必须真有，否则开机补充组装不回它们。
+_ak_c4=0
+for _ak_pat in luci-app-partexp-*.apk luci-app-taskplan-*.apk \
+               luci-i18n-partexp-zh-cn-*.apk luci-i18n-taskplan-zh-cn-*.apk; do
+    for _ak_f4 in packages/$_ak_pat; do
+        [ -f "$_ak_f4" ] || continue
+        _ak_is_apk "$_ak_f4" || continue
+        [ -f "$_AK_DIR/${_ak_f4##*/}" ] && continue
+        cp -f "$_ak_f4" "$_AK_DIR"/ && _ak_c4=$((_ak_c4 + 1))
+    done
+done
+echo "==> [apk-cache] 来源 C4（partexp/taskplan）：补拷 $_ak_c4 个 apk"
+for _ak_w4 in luci-app-partexp luci-app-taskplan; do
+    ls "$_AK_DIR/$_ak_w4"-[0-9]*.apk >/dev/null 2>&1 \
+        || echo "::warning::库里仍缺 $_ak_w4（开机补充组装不回它）"
+done
+
 # ---- 【2026-11-09】同名多版本去重 ----
 # run 包实测会带同一个包的两个版本（daed-2026.06.14-r1 与 -r7 并存，差 25MB；
 # luci-app-daed 同时有 1.4-r1 和 26.298 时也是两份）。旧版白占 squashfs，
