@@ -242,6 +242,24 @@ _pa_kmods() {
     grep -oE '^P:kmod-[A-Za-z0-9_.-]+' "$ROMDIR/lib/apk/db/installed" 2>/dev/null | sed 's/^P://'
 }
 
+# 【2026-11-19 用户定】开机补充组：**只走开机那一次 --repair**，不进 _PA_LIST / --check / --list。
+# 为什么要单独一组：这批 luci-app 固件里确实装着，但既不在保护组、也不在 manifest.txt，
+# 被 apk del 掉后过去只能手动从本地库装回。名单来自 201 实测（出厂 39 个 luci-app − 保护组 − manifest）。
+# 不含 luci-app-partexp / luci-app-taskplan：这两个的 apk 不在本地库、官方 index.json 也没这个键
+# （是构建时从 run 包铺进去的），列进来只会「报缺但修不回」，故排除。
+_PA_BOOT_APPS="luci-app-3ginfo-lite luci-app-adblock luci-app-aria2 luci-app-cifs-mount luci-app-diskman luci-app-email luci-app-filemanager luci-app-firewall luci-app-hd-idle luci-app-ksmbd luci-app-nfs luci-app-openvpn luci-app-p910nd luci-app-package-manager luci-app-rtp2httpd luci-app-sqm luci-app-timewol luci-app-ttyd luci-app-uhttpd luci-app-upnp luci-app-wechatpush"
+
+# 开机补充组里「该有却没有」的（只给 --repair 用）
+_pa_missing_boot() {
+    _pa_mbo=""
+    for _pa_p in $_PA_BOOT_APPS; do
+        _pa_should "$_pa_p" || continue
+        if _pa_installed "$_pa_p" && _pa_files_ok "$_pa_p"; then continue; fi
+        _pa_mbo="$_pa_mbo $_pa_p"
+    done
+    printf '%s\n' "$_pa_mbo" | sed 's/^ *//'
+}
+
 # 依赖组里「该有却没有」的（只给 --repair 用；--check 不调它）
 _pa_missing_deps() {
     _pa_md=""
@@ -435,6 +453,27 @@ _pa_repair() {
             fi
         done
     fi
+    # 开机补充组（21 个 luci-app）：同样点名装，装完不清缓存会看不到新菜单
+    _pa_bm=$(_pa_missing_boot)
+    if [ -n "$_pa_bm" ]; then
+        for _pa_p in $_pa_bm; do
+            log "装回 $_pa_p（开机补充组）"
+            if _pa_installed "$_pa_p"; then
+                if "$_RESTORE" --force "$_pa_p"; then
+                    log "装回完成 $_pa_p（强制重装：包在册，文件缺失）"
+                else
+                    log "装回失败 $_pa_p（强制重装没成功）"
+                fi
+            elif _pa_add_local "$_pa_p"; then
+                log "装回完成 $_pa_p（开机补充组）"
+            else
+                log "装回失败 $_pa_p（本地包库没有它）"
+            fi
+        done
+        rm -f /tmp/luci-indexcache* 2>/dev/null
+        rm -rf /tmp/luci-modulecache/* 2>/dev/null
+        [ -x /etc/init.d/uhttpd ] && /etc/init.d/uhttpd reload >/dev/null 2>&1
+    fi
     # OpenClash 内核/geo 数据不属任何包，先按 /rom 出厂副本补一次
     if ! _pa_oc_files_ok; then
         _pa_oc_files_repair
@@ -477,6 +516,7 @@ _pa_repair() {
     # 装完必须重判。apk 没有缓存，直接重算即可。
     [ -z "$(_pa_missing)" ] || return 1
     [ -z "$(_pa_missing_deps)" ] || return 1
+    [ -z "$(_pa_missing_boot)" ] || return 1
     if ! _pa_oc_files_ok; then
         return 1
     fi
