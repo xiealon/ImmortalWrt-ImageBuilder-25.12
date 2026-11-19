@@ -706,7 +706,8 @@ luci-app-frpc luci-app-frps luci-i18n-frpc-zh-cn luci-i18n-frps-zh-cn nginx-full
 libacl libbz2 libcap-ng libcomerr libdbus libe2p libext2fs libf2fs libfdisk libffi libiptext libiwinfo libiwinfo-data liblua liblzma libparted libsensors libsmartcols libss libsysfs libuclient libudebug libustream-openssl libzstd
 luci-app-3ginfo-lite luci-app-adblock luci-app-cifs-mount luci-app-diskman luci-app-email luci-app-firewall luci-app-hd-idle luci-app-ksmbd luci-app-nfs luci-app-openvpn luci-app-p910nd luci-app-package-manager luci-app-sqm luci-app-timewol luci-app-ttyd luci-app-uhttpd luci-app-upnp luci-app-wechatpush
 bc f2fs-tools f2fsck losetup resize2fs e2fsprogs tune2fs blkid
-p910nd"
+p910nd
+gawk coreutils-sort rpcd-mod-rpcsys luci-i18n-adblock-zh-cn luci-app-smartdns luci-i18n-smartdns-zh-cn"
 
 # 来源 A：packages/ 里 run 包解出的 apk（第三方包，官方源没有）
 #
