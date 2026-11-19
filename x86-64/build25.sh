@@ -980,8 +980,8 @@ _AK_AWK="${_AK_AWK:-awk}"
 # 原因：index.json 的键是源包名（libubox/libxml2/libruby），而仓库里的文件叫
 # libubox20260213-<ver>.apk、libxml2-16-<ver>.apk、libruby3.4-<ver>.apk，
 # 猜名会 404（实测 35 个包因此没进库，含 openclash 依赖的 libruby3.4）。
-# 做法：写一个只含官方源的临时 repositories 文件，apk update 后 list --available，
-# 得到权威的 "<name>-<ver>" 列表；下载时按该名去各 feed 试，命中即止。
+# 做法：下每个 feed 的 packages.adb，用 apk adbdump 抽「真名-版本」当权威列表；
+# 下载时按该名去各 feed 试，命中即止。
 _ak_avail=/tmp/ak-avail.txt
 _ak_idxadb=/tmp/ak-idx.adb
 : > "$_ak_avail"
