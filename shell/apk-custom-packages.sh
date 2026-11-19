@@ -171,5 +171,3 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES glib2 crconf davici swanmon kmod-crypto-chacha
 #   frpc/frps → 自建中转（luci-app-frpc / luci-app-frps）
 #   无界面的 haproxy / lighttpd / stunnel 已从库中移除；socat 作为依赖保留。
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES gost luci-app-gost luci-i18n-gost-zh-cn"
-CUSTOM_PACKAGES="$CUSTOM_PACKAGES tinyproxy luci-app-tinyproxy luci-i18n-tinyproxy-zh-cn"
-CUSTOM_PACKAGES="$CUSTOM_PACKAGES frpc frps luci-app-frpc luci-app-frps luci-i18n-frpc-zh-cn luci-i18n-frps-zh-cn"
