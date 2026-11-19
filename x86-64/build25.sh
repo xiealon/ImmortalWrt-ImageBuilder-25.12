@@ -1001,6 +1001,24 @@ if [ -n "$_AK_DL" ]; then
             _ak_keep=0
             for _ak_e in "$_AK_DIR/$_ak_nm"-*.apk; do
                 [ -f "$_ak_e" ] || continue
+                # 【2026-11-19 修④ · #129 日志实证】"$_ak_nm"-*.apk 是「前缀」匹配，会把
+                # 同前缀的**独立子包**当成同名包、按版本替换掉直接删。实测被误删 6 个：
+                #   libnl cli200 / core200 / genl200 / nf200 / route200 / tiny1
+                # （合计 1456 = 1417 - 6 + 45，正好少 6）。
+                # 另外 libopenssl-conf、libubus-lua、libuci-lua、liblucihttp-lua/ucode、
+                # lua-neturl 也走进了这条「替换」，同样被删。
+                # 过滤规则：去掉名字后的尾巴必须是「[: -0-9.]* + -<版本>」，
+                # 中段只许数字/点/连字符；带字母的一律跳过（libnl-cli200 的 mid=-cli200 被挡）。
+                _ak_et="${_ak_e##*/}"
+                _ak_et="${_ak_et%.apk}"
+                _ak_et="${_ak_et#"$_ak_nm"}"
+                case "$_ak_et" in
+                *"-$_ak_ver") _ak_mid="${_ak_et%"-$_ak_ver"}" ;;
+                *) continue ;;
+                esac
+                case "$_ak_mid" in
+                "" | *[!0-9.-]*) continue ;;
+                esac
                 if ! _ak_is_apk "$_ak_e"; then
                     rm -f "$_ak_e"
                     echo "::warning::丢弃非法 apk（交回官方源）：${_ak_e##*/}"
