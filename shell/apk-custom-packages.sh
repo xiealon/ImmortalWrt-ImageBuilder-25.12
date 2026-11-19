@@ -181,5 +181,12 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES glib2 crconf davici swanmon kmod-crypto-chacha
 #   open() "/www/cgi-bin/luci/..." failed (20: Not a directory)
 # 现在改回「uhttpd 独占 80」；nginx 的 apk 仍在本地库（白名单里保留），
 # 要用时 apk add nginx-full nginx-mod-stream nginx-ssl-util 再手写配置。
+# # 【2026-11-19 用户定 · A 方案】nginx 三件从固件撤出。
+# 原因（201 实测）：nginx-full 依赖的 nginx-ssl-util 自带 /etc/config/nginx，
+# 里面 _redirect2ssl 监听 80（302→https）、_lan 监听 443 ssl 且 root /www，
+# 一开机就把 80/443 抢走 → uhttpd 绑不上 80 → LuCI 被 nginx 当静态文件找，报
+#   open() "/www/cgi-bin/luci/..." failed (20: Not a directory)
+# 现在改回「uhttpd 独占 80」；nginx 的 apk 仍在本地库（白名单里保留），
+# 要用时 apk add nginx-full nginx-mod-stream nginx-ssl-util 再手写配置。
 # CUSTOM_PACKAGES="$CUSTOM_PACKAGES nginx-full nginx-mod-stream nginx-ssl-util"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES frpc frps luci-app-frpc luci-app-frps luci-i18n-frpc-zh-cn luci-i18n-frps-zh-cn"
