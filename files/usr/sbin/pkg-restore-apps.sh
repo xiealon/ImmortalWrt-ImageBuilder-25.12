@@ -235,7 +235,7 @@ _PA_LIST="${CS_PROBE_APPS:-$_PA_OC $_PA_CERT $_PA_DDNS $_PA_TOOLS $_PA_SSRP $_PA
 # luci-app-openclash 一次装回 11 个，617 包 / 680.0 MiB 完全复原。
 # 名字全部用「库里的真名」——白名单里的 libubox 在库里叫 libubox20260213，装包必须按真名。
 # 出厂没装过的会被 _pa_should 过滤掉（查 /rom/lib/apk/db/installed 的 P: 行），不会强加。
-_PA_DEPS="jansson4 libblkid1 libblobmsg-json20260213 libbpf1 libelf1 libgmp10 libjson-c5 libjson-script20260213 libltdl7 libmbedtls21 libmnl0 libmount1 libncurses6 libnetfilter-conntrack3 libnettle8 libnfnetlink0 libnftnl11 libnl-cli200 libnl-core200 libnl-genl200 libnl-nf200 libnl-route200 libnl-tiny1 libnl200 libopenssl3 libpcap1 libreadline8 libubox20260213 libubus20251202 libuci20250120 libucode20230711 libuuid1 libxml2-16 liblucihttp0 libcurl4 liblua5.4-5.4 liblzo2 libnghttp2-14 libruby3.4 libsqlite3-0 libuv1 libatomic1 libgcc1 libstdcpp6 libxtables12"
+_PA_DEPS="jansson4 libblkid1 libblobmsg-json20260213 libbpf1 libelf1 libgmp10 libjson-c5 libjson-script20260213 libltdl7 libmbedtls21 libmnl0 libmount1 libncurses6 libnetfilter-conntrack3 libnettle8 libnfnetlink0 libnftnl11 libnl-cli200 libnl-core200 libnl-genl200 libnl-nf200 libnl-route200 libnl-tiny1 libnl200 libopenssl3 libpcap1 libreadline8 libubox20260213 libubus20251202 libuci20250120 libucode20230711 libuuid1 libxml2-16 liblucihttp0 libcurl4 liblua5.4-5.4 liblzo2 libnghttp2-14 libruby3.4 libsqlite3-0 libuv1 libatomic1 libgcc1 libstdcpp6 libxtables12 kmod-usb-printer kmod-lp"
 
 # kmod 不写死：随内核版本变，直接从出厂库现取（201 实测 212 个，库内 212/212 都有 apk）
 _pa_kmods() {
