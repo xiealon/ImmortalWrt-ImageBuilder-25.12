@@ -173,3 +173,4 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES glib2 crconf davici swanmon kmod-crypto-chacha
 # nginx（官方 2.4 版本线：1.26.3）：无 LuCI 界面，配置手写。
 # 自带 nginx.conf 覆盖官方缺失，装完 `nginx -t` 即通过，默认不启用。
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES nginx-full nginx-mod-stream nginx-ssl-util"
+CUSTOM_PACKAGES="$CUSTOM_PACKAGES frpc frps luci-app-frpc luci-app-frps luci-i18n-frpc-zh-cn luci-i18n-frps-zh-cn"
