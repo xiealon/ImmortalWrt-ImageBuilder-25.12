@@ -245,9 +245,10 @@ _pa_kmods() {
 # 【2026-11-19 用户定】开机补充组：**只走开机那一次 --repair**，不进 _PA_LIST / --check / --list。
 # 为什么要单独一组：这批 luci-app 固件里确实装着，但既不在保护组、也不在 manifest.txt，
 # 被 apk del 掉后过去只能手动从本地库装回。名单来自 201 实测（出厂 39 个 luci-app − 保护组 − manifest）。
+# 不含 luci-app-adblock：它归 /usr/sbin/adblock/restore.sh 那套四态脚本（含 luci-app-adblock）。
 # 不含 luci-app-partexp / luci-app-taskplan：这两个的 apk 不在本地库、官方 index.json 也没这个键
 # （是构建时从 run 包铺进去的），列进来只会「报缺但修不回」，故排除。
-_PA_BOOT_APPS="luci-app-3ginfo-lite luci-app-adblock luci-app-aria2 luci-app-cifs-mount luci-app-diskman luci-app-email luci-app-filemanager luci-app-firewall luci-app-hd-idle luci-app-ksmbd luci-app-nfs luci-app-openvpn luci-app-p910nd luci-app-package-manager luci-app-rtp2httpd luci-app-sqm luci-app-timewol luci-app-ttyd luci-app-uhttpd luci-app-upnp luci-app-wechatpush"
+_PA_BOOT_APPS="luci-app-3ginfo-lite luci-app-aria2 luci-app-cifs-mount luci-app-diskman luci-app-email luci-app-filemanager luci-app-firewall luci-app-hd-idle luci-app-ksmbd luci-app-nfs luci-app-openvpn luci-app-p910nd luci-app-package-manager luci-app-rtp2httpd luci-app-sqm luci-app-timewol luci-app-ttyd luci-app-uhttpd luci-app-upnp luci-app-wechatpush"
 
 # 开机补充组里「该有却没有」的（只给 --repair 用）
 _pa_missing_boot() {
