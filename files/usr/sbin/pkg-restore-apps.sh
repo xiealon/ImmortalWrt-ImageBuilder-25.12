@@ -170,7 +170,7 @@ _PA_OC_FILES="/etc/openclash/core/clash_meta /etc/openclash/GeoIP.dat /etc/openc
 # 【2026-11-18】同一套保护也覆盖 honk/dae 的 geo 数据。
 # 语义与上面一致：只判「存在且非空」，不比内容、不比大小 —— honk 或 OpenClash
 # 自己更新后文件非空，保护就放过（更新能保留）；被删/被清空才从 /rom 拷回。
-_PA_ASSET_FILES="$_PA_OC_FILES /usr/share/v2ray/geoip.dat /usr/share/v2ray/geosite.dat /etc/adblock/adblock.blocklist /etc/nginx/nginx.conf"
+_PA_ASSET_FILES="$_PA_OC_FILES /usr/share/v2ray/geoip.dat /usr/share/v2ray/geosite.dat /etc/adblock/adblock.blocklist"
 # [2026-11-18] clashoo -> nikki. ssr-plus is the fallback when nikki fails.
 # nikki and clashoo both provide mihomo: mutually exclusive, firmware ships nikki only.
 _PA_SSRP="luci-app-ssr-plus luci-i18n-ssr-plus-zh-cn xray-core shadowsocksr-libev-ssr-local shadowsocksr-libev-ssr-redir"
