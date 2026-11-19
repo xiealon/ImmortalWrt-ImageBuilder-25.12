@@ -1091,16 +1091,15 @@ if [ -n "$_AK_DL" ]; then
             done
             [ "$_ak_keep" = "1" ] && continue
             # 先按索引快照里的真实包名拼文件名（libubox -> libubox20260213-<ver>）
-            _ak_fn="$_ak_nm-$_ak_ver.apk"
-            # 【2026-11-19 修】文件名匹配：前缀必须等于 w、以 "-<版本>" 结尾，
-            # 且中间那段只允许 soname 数字（20260213 / 16 / 5.4 / 1 / 空）。
-            # 为什么加这条限制：libubox 实测会被 libubox-lua-2026.06.19~7dd12784-r1
-            # 抢走（前缀满足、尾巴也满足），libnl 会抢到 libnl-core-*；
-            # 加「中段只能是数字/点」后 libubox-lua（中段 -lua）和 libnl-core（中段 -core）
-            # 都被排除，libnl 仍能拿到 libnl200-3.12.0-r1（中段 200）。
-            # 201 实测：45 个缺单全部命中唯一文件名，6 个 feed 轮询后 HEAD 全 200。
+            # 【2026-11-19 修⑤】一个白名单名可能对应**多个真名**：libiptext ->
+            # libiptext0 / libiptext6-0 / libiptext-nft0（三独立包，同版本）。
+            # 只取「最短尾巴」那一个会漏掉另外两个，库就不完整。改成把匹配到的
+            # 全部真名都下载（已存在跳过）。匹配规则不变：前缀必须等于 w、
+            # 以 "-<版本>" 结尾、中段只允许 soname 数字（libubox-lua 的 mid=-lua、
+            # libnl-core 的 mid=-core 都被排除）。
+            _ak_cands=""
             if [ -s "$_ak_avail" ]; then
-                _ak_real=$("$_AK_AWK" -v w="$_ak_nm" -v v="$_ak_ver" '
+                _ak_cands=$("$_AK_AWK" -v w="$_ak_nm" -v v="$_ak_ver" '
                     {
                         if (substr($1, 1, length(w)) != w) next
                         tail = substr($1, length(w) + 1)
@@ -1109,30 +1108,35 @@ if [ -n "$_AK_DL" ]; then
                         if (substr(tail, length(tail) - vn) != "-" v) next
                         mid = substr(tail, 1, length(tail) - vn - 1)
                         if (mid != "" && mid !~ /^-?[0-9][0-9.]*$/) next
-                        if (best == "" || length(tail) < length(bt)) { best = $1; bt = tail }
-                    }
-                    END { if (best != "") print best }' "$_ak_avail")
-                [ -n "$_ak_real" ] && _ak_fn="$_ak_real.apk"
+                        print $1
+                    }' "$_ak_avail" | sort -u)
             fi
-            # 先试「当前 feed」（名字就是从它的 index.json 里查到的），命中就不再来回试，
-            # 未命中才轮询其余 feed；探测失败静默（curl -fsSL 的 404 会刷屏，容易误判成构建失败）
+            [ -n "$_ak_cands" ] || _ak_cands="$_ak_nm-$_ak_ver"
             _ak_ok=0
-            if _ak_dl "$_ak_u/$_ak_fn" "$_AK_DIR/$_ak_fn" 2>/dev/null; then
-                _ak_ok=1
-            else
-                for _ak_fd2 in $_AK_FEEDS; do
-                    [ "$_AK_BASE/$_ak_fd2" = "$_ak_u" ] && continue
-                    if _ak_dl "$_AK_BASE/$_ak_fd2/$_ak_fn" "$_AK_DIR/$_ak_fn" 2>/dev/null; then
-                        _ak_ok=1
-                        break
-                    fi
-                done
-            fi
-            if [ "$_ak_ok" = "1" ]; then
-                _ak_b=$((_ak_b + 1))
-                [ "$_ak_fn" != "$_ak_nm-$_ak_ver.apk" ] && \
+            for _ak_real in $_ak_cands; do
+                _ak_fn="$_ak_real.apk"
+                [ -f "$_AK_DIR/$_ak_fn" ] && { _ak_ok=1; continue; }
+                # 先试「当前 feed」（名字就是从它的 index.json 里查到的），命中就不再来回试，
+                # 未命中才轮询其余 feed；探测失败静默（curl -fsSL 的 404 会刷屏）。
+                if _ak_dl "$_ak_u/$_ak_fn" "$_AK_DIR/$_ak_fn" 2>/dev/null; then
+                    _ak_ok=1
+                else
+                    for _ak_fd2 in $_AK_FEEDS; do
+                        [ "$_AK_BASE/$_ak_fd2" = "$_ak_u" ] && continue
+                        if _ak_dl "$_AK_BASE/$_ak_fd2/$_ak_fn" "$_AK_DIR/$_ak_fn" 2>/dev/null; then
+                            _ak_ok=1
+                            break
+                        fi
+                    done
+                fi
+                if [ "$_ak_ok" = "1" ] && [ "$_ak_real" != "$_ak_nm-$_ak_ver" ]; then
+                    _ak_b=$((_ak_b + 1))
                     echo "==> [apk-cache] 索引名命中: $_ak_nm -> $_ak_fn"
-            else
+                elif [ "$_ak_ok" = "1" ]; then
+                    _ak_b=$((_ak_b + 1))
+                fi
+            done
+            if [ "$_ak_ok" != "1" ]; then
                 _ak_miss="$_ak_miss $_ak_nm"
             fi
         done
