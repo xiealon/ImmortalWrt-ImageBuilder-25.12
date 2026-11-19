@@ -1108,7 +1108,9 @@ if [ -n "$_AK_DL" ]; then
                         if (length(tail) < vn + 1) next
                         if (substr(tail, length(tail) - vn) != "-" v) next
                         mid = substr(tail, 1, length(tail) - vn - 1)
-                        if (mid != "" && mid !~ /^-?[0-9][0-9.]*$/) next
+                        # 中段允许数字/点/连字符：libiptext6-0 的 mid=6-0、
+                        # libpcre2-16 的 mid=-16 都要过；libnl-core 的 mid=-core（字母）仍被挡。
+                        if (mid != "" && mid !~ /^-?[0-9][0-9.-]*$/) next
                         print $1
                     }' "$_ak_avail" | sort -u)
             fi
@@ -1145,6 +1147,22 @@ if [ -n "$_AK_DL" ]; then
 else
     echo "::warning::容器里既没有 curl 也没有 wget，官方源这部分收不到"
 fi
+# 【2026-11-19 修⑥】少数真名带**字母后缀**（libiptext-nft0 的 mid=-nft0），
+# 无法从 index.json 的源名推出来（源名 libiptext 只给数字后缀那几个）。
+# 这里按真名再补一轮：从快照里取 "<真名>-<数字版本>" 的行直接下载。
+for _ak_rn in libiptext-nft0; do
+    for _ak_line in $(grep -E "^$_ak_rn-[0-9]" "$_ak_avail" 2>/dev/null); do
+        _ak_fn="$_ak_line.apk"
+        [ -f "$_AK_DIR/$_ak_fn" ] && continue
+        for _ak_fd3 in $_AK_FEEDS; do
+            if _ak_dl "$_AK_BASE/$_ak_fd3/$_ak_fn" "$_AK_DIR/$_ak_fn" 2>/dev/null; then
+                _ak_b=$((_ak_b + 1))
+                echo "==> [apk-cache] 额外真名补齐: $_ak_fn"
+                break
+            fi
+        done
+    done
+done
 echo "==> [apk-cache] 来源 B（官方源 index.json 直下）：$_ak_b 个 apk"
 if [ -n "$_ak_miss" ]; then
     echo "::warning::以下包在官方源上没下到（可能已改名或不在 25.12.2 源里）：$_ak_miss"
@@ -1157,8 +1175,16 @@ fi
 #
 # 包名取法：从左起，第一个「以数字开头」的 -段 之前的部分就是包名。
 # 不能从右往左截：lxc-auto-6.0.5-r1 的包名自己带连字符，而版本一定是数字开头。
+# 【2026-11-19 修⑥】原来的启发式（从左起第一个以数字开头的段之前就是包名）会把
+# libpcre2-16-10.47-r1 / libpcre2-32-10.47-r1 / libpcre2-10.47-r1 归成同一个包名
+# libpcre2，于是 #131 实测把前两个当「旧版本」删了（它们是三个独立包！）。
+# 现在改成严格剥离结尾的 "-<版本>-r<N>"（版本段内不含连字符），剩下的才是包名：
+#   libpcre2-16-10.47-r1 -> libpcre2-16   libpcre2-10.47-r1 -> libpcre2
+#   libubox20260213-2026.06.19~7dd12784-r1 -> libubox20260213
+#   xray-core-26.11.9-r2 -> xray-core      daed-2026.11.17-r1 -> daed
+# 剥不掉（没有 -rN 结尾）的按唯一名处理，不做去重。
 _ak_pn_of() {
-    printf '%s' "$1" | awk -F'-' '{pn=""; for(i=1;i<=NF;i++){ if($i ~ /^[0-9]/) break; pn=(pn==""?$i:pn"-"$i) } if(pn!="") print pn}'
+    printf '%s' "$1" | sed -E 's/-[0-9][^-]*-r[0-9]+$//'
 }
 # 【2026-11-17 修】kmod 不参与同名去重。
 # 起因：_ak_pn_of 的启发式是「从左起第一个以数字开头的 -段 之前就是包名」，
