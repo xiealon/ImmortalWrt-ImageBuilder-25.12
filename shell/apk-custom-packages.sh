@@ -2,9 +2,8 @@
 # 【v.180.198】固件版本标记 —— 与 crowdsec-lxc-bootstrap.sh 的 SCRIPT_VER 同步，每次改脚本一起改
 
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-partexp luci-i18n-partexp-zh-cn"
-# 【2026-11-19 用户定】rtp2httpd 大概率用不到 → 从固件撤出，apk 仍留在本地库，
-# 需要时 apk add 即可（luci-app-rtp2httpd / luci-i18n-rtp2httpd-zh-cn）。
-# CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-rtp2httpd luci-i18n-rtp2httpd-zh-cn"
+# 【2026-11-19 用户定】rtp2httpd 保持原样（留在固件里）。
+CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-rtp2httpd luci-i18n-rtp2httpd-zh-cn"
 # 【2026-11-02】lucky 移除（用户定：只去纯重复的，一个功能留一个）。
 # lucky 是全能型（DDNS + 反向代理 + 端口转发 + Web 服务 + SSL 证书），
 # 它的每一项在固件里都已有专用工具且是从没配过的状态：
