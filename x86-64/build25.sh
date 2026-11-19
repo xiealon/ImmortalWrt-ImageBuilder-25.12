@@ -694,7 +694,15 @@ libelf libgcc libgmp libjson-c liblucihttp-lua liblucihttp libmnl libncurses
 libnetfilter-conntrack libnettle libnfnetlink libnftnl libnl-tiny libopenssl libreadline libubox
 libubus-lua libubus libuci libucode lua luci-lib-base luci-lib-ip luci-lib-jsonc
 luci-lib-nixio ruby-bigdecimal ruby-date ruby-digest ruby-enc ruby-pstore ruby-psych ruby-stringio
-terminfo ucode-mod-lua liblua5.1 libnghttp2 libruby acme-acmesh acme-common luci-app-acme luci-i18n-acme-zh-cn ddns-go luci-app-ddns-go luci-i18n-ddns-go-zh-cn openssl-util socat wget-ssl aria2 aria2-openssl ariang cloudflared ksmbd-server libblkid libjson-script liblzo libmount libnl-cli libnl-core libnl-genl libnl-nf libnl-route libnl libopenssl-conf libopenssl-legacy libpcre2 libstdcpp libtirpc libuuid libuv libwrap libxtables lsqlite3 luci-app-aria2 luci-app-cloudflared luci-app-filemanager luci-app-nps luci-app-tailscale-community nfs-kernel-server nfs-utils nginx-full nginx-mod-stream nginx-ssl-util npc rpcbind tailscale uhttpd libsqlite3 libxml2 luci-i18n-nps-zh-cn luci-i18n-cloudflared-zh-cn luci-i18n-tailscale-community-zh-cn luci-i18n-aria2-zh-cn luci-i18n-filemanager-zh-cn"
+terminfo ucode-mod-lua liblua5.1 libnghttp2 libruby acme-acmesh acme-common luci-app-acme
+luci-i18n-acme-zh-cn ddns-go luci-app-ddns-go luci-i18n-ddns-go-zh-cn openssl-util socat wget-ssl aria2
+aria2-openssl ariang cloudflared ksmbd-server libblkid libjson-script liblzo libmount
+libnl-cli libnl-core libnl-genl libnl-nf libnl-route libnl libopenssl-conf libopenssl-legacy
+libpcre2 libstdcpp libtirpc libuuid libuv libwrap libxtables lsqlite3
+luci-app-aria2 luci-app-cloudflared luci-app-filemanager luci-app-nps luci-app-tailscale-community nfs-kernel-server nfs-utils npc
+rpcbind tailscale uhttpd libsqlite3 libxml2 luci-i18n-nps-zh-cn luci-i18n-cloudflared-zh-cn luci-i18n-tailscale-community-zh-cn
+luci-i18n-aria2-zh-cn luci-i18n-filemanager-zh-cn haproxy gost lighttpd lighttpd-mod-proxy stunnel libatomic
+libltdl liblua5.4 libmbedtls"
 
 # 来源 A：packages/ 里 run 包解出的 apk（第三方包，官方源没有）
 #
