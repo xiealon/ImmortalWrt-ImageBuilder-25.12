@@ -185,3 +185,6 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES glib2 crconf davici swanmon kmod-crypto-chacha
 #   frpc/frps → 自建中转（luci-app-frpc / luci-app-frps）
 #   无界面的 haproxy / lighttpd / stunnel 已从库中移除；socat 作为依赖保留。
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES gost luci-app-gost luci-i18n-gost-zh-cn"
+# nginx（官方 2.4 版本线：1.26.3）：无 LuCI 界面，配置手写。
+# 自带 nginx.conf 覆盖官方缺失，装完 `nginx -t` 即通过，默认不启用。
+CUSTOM_PACKAGES="$CUSTOM_PACKAGES nginx-full nginx-mod-stream nginx-ssl-util"
