@@ -126,16 +126,16 @@ if [ "$_need_apply" = 1 ] || [ "$_need_reload" = 1 ]; then
     _fixed="$_fixed 06-apply"
 elif sh "$_here/06-apply.sh" --check >/dev/null 2>&1; then
     log "06-apply 已达标（53 归 smartdns），跳过重启"
-
-# 【2026-11-19 修】STEPS 里写了 95-luci，但主流程只跑 01~06，95 永远不执行 ——
-# 真机实测：删掉 luci-app-smartdns 后 --check 已能返 5，完整跑却仍不装回界面。
-_sd_restore_step 95-luci || { log "界面恢复失败（只读基座里没有它的安装清单）"; }
-
 else
     log "服务未就绪，执行 apply"
     sh "$_here/06-apply.sh" || exit 1
     _fixed="$_fixed 06-apply"
 fi
+
+# 【2026-11-19 修】STEPS 里写了 95-luci，但主流程只跑 01~06，95 永远不执行 ——
+# 真机实测：删掉 luci-app-smartdns 后 --check 已能返 5，完整跑却仍不装回界面。
+_sd_restore_step 95-luci || { log "界面恢复失败（只读基座里没有它的安装清单）"; }
+
 
 if [ -z "$_fixed" ]; then
     log "全部步骤达标，未改动任何配置，DNS 未中断"
