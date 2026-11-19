@@ -1153,6 +1153,26 @@ for _ak_w in coreutils-stat sqlite3-cli; do
 done
 echo "==> [apk-cache] 来源 C3（honk 依赖）：补拷 $_ak_c3d 个，库内已核验 coreutils-stat / sqlite3-cli 齐备"
 
+# 【2026-11-19 用户定 · C4】luci-app-partexp / luci-app-taskplan 这两个界面只随 run 包进来
+# （官方 index.json 里没有这两个键，加白名单也下不到），之前又被当成「改名前的旧包」从库里剔掉，
+# 结果 apk del 之后再也装不回（它们各自自带 /usr/bin/partexp、/usr/bin/taskplanhandler 与 init 脚本）。
+# 这里直接从 packages/ 拷进库；拷完必须真的有，否则开机补充组装不回它们。
+_ak_c4=0
+for _ak_pat in luci-app-partexp-*.apk luci-app-taskplan-*.apk \
+               luci-i18n-partexp-zh-cn-*.apk luci-i18n-taskplan-zh-cn-*.apk; do
+    for _ak_f4 in packages/$_ak_pat; do
+        [ -f "$_ak_f4" ] || continue
+        _ak_is_apk "$_ak_f4" || continue
+        [ -f "$_AK_DIR/${_ak_f4##*/}" ] && continue
+        cp -f "$_ak_f4" "$_AK_DIR"/ && _ak_c4=$((_ak_c4 + 1))
+    done
+done
+echo "==> [apk-cache] 来源 C4（partexp/taskplan）：补拷 $_ak_c4 个 apk"
+for _ak_w4 in luci-app-partexp luci-app-taskplan; do
+    ls "$_AK_DIR/$_ak_w4"-[0-9]*.apk >/dev/null 2>&1 \
+        || echo "::warning::库里仍缺 $_ak_w4（开机补充组装不回它）"
+done
+
 # ---- 【2026-11-09】同名多版本去重 ----
 # run 包实测会带同一个包两个版本（201 上 daed-2026.06.14-r1 与 -r7 并存，差 25MB）。
 # 旧版白占 squashfs，还会让 apk fix 找「已装版本」时多绕。只留版本最高的。
