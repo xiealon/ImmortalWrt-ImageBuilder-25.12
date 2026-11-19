@@ -181,7 +181,7 @@ _PA_SSRP="luci-app-ssr-plus luci-i18n-ssr-plus-zh-cn xray-core shadowsocksr-libe
 # 三件都在包库 /rom/root/apk-cache 里 —— build25.sh 的 daed 段下载、
 # 构建期断言 _ak_need_daed 也会在打包前核实一遍，所以探针判出缺失时
 # 能从本地装回，不需要联网。
-_PA_DAED="daed luci-app-daed daed-geoip daed-geosite vmlinux-btf"
+_PA_DAED="daed luci-app-daed daed-geoip daed-geosite"
 # 【2026-11-02】geo 数据单独成组：包级判据（apk info -e），不判文件。
 #
 # 这一组负责的只是「包被人 apk del 掉」——装回时连文件带记账一起回来。
@@ -210,7 +210,7 @@ _PA_COMMON="sing-box"
 #
 # 结论：这三个组只走 _pa_installed（apk info -e），文件级一律放行。
 # 二进制真被删了，重装包自然连文件一起回来；配置文件不被任何自动动作碰。
-_PA_HONK="honk luci-app-honk luci-i18n-honk-zh-cn"
+_PA_HONK="honk luci-app-honk"
 _PA_PKGONLY="$_PA_OC $_PA_CERT $_PA_DDNS $_PA_TOOLS $_PA_SSRP $_PA_DAED $_PA_HONK $_PA_WEB"
 
 # 【2026-11-02】daed 在 25.12 线已被 honk 取代（用户定），原来的 geo 软链接判据一并删除：
