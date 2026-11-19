@@ -950,10 +950,19 @@ if [ -n "$_AK_BIN" ]; then
     #   不带 allow-untrusted → 「3 unavailable, 0 stale; 618 distinct packages」
     #   带  --allow-untrusted → 「OK: 10698 distinct packages available」
     # 另：--cache-dir 指的目录必须先建好，否则 apk 直接报 "Unable to setup the cache"。
+    # 【2026-11-19 修② · run #127 日志实证】加了 --allow-untrusted 之后仍然失败，
+    # 真实报错只有一行（之前被 2>/dev/null 吞了）：
+    #   ERROR: Unable to open log: Permission denied
+    # apk 3 每次打开数据库都会写 <root>/var/log/apk.log，而 GitHub runner 是普通用户、
+    # /var/log 不可写 → update 直接返回非 0。apk 自带开关：
+    #   --logfile[=BOOL]  If turned off, disables the writing of the log file
+    # 201 实测（/var/log/apk.log 的 mtime+size 对照）：
+    #   不带 → 10:28:52 写、36380→36839 字节
+    #   带 --logfile=no → mtime/size 不变，update 仍 OK: 9669 distinct packages，list 仍出 9375 行
     mkdir -p "$_ak_cache"
-    if "$_AK_BIN" --allow-untrusted --cache-dir "$_ak_cache" update \
+    if "$_AK_BIN" --allow-untrusted --logfile=no --cache-dir "$_ak_cache" update \
             --repositories-file "$_ak_feedlist" >"$_ak_updlog" 2>&1; then
-        "$_AK_BIN" --allow-untrusted --cache-dir "$_ak_cache" list --available \
+        "$_AK_BIN" --allow-untrusted --logfile=no --cache-dir "$_ak_cache" list --available \
             --repositories-file "$_ak_feedlist" 2>/dev/null | awk '{print $1}' > "$_ak_avail"
         echo "==> [apk-cache] 索引快照：$(wc -l < "$_ak_avail") 个可用包（用于真实文件名）"
     else
