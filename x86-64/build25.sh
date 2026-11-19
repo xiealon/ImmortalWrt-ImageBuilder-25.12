@@ -1022,17 +1022,23 @@ if [ -n "$_AK_DL" ]; then
             [ "$_ak_keep" = "1" ] && continue
             # 先按索引快照里的真实包名拼文件名（libubox -> libubox20260213-<ver>）
             _ak_fn="$_ak_nm-$_ak_ver.apk"
-            # 【2026-11-19 修】原来靠正则 "^w[0-9.-]*-v$"：版本里带 ~ 时虽能靠字面匹配过，
-            # 但 libnl 会先撞上 libnl-core-<同版本>（前缀也满足），拿到错的包名。
-            # 改成纯字符串比较：前缀必须等于 w，尾巴必须正好是 "-<版本>"；
-            # 多个命中取尾巴最短的那个（=精确名优先，libnl 不会吃掉 libnl-core）。
-            # 201 实测：45 个缺单全部命中，抽检 12 个 HEAD 全 200。
+            # 【2026-11-19 修】文件名匹配：前缀必须等于 w、以 "-<版本>" 结尾，
+            # 且中间那段只允许 soname 数字（20260213 / 16 / 5.4 / 1 / 空）。
+            # 为什么加这条限制：libubox 实测会被 libubox-lua-2026.06.19~7dd12784-r1
+            # 抢走（前缀满足、尾巴也满足），libnl 会抢到 libnl-core-*；
+            # 加「中段只能是数字/点」后 libubox-lua（中段 -lua）和 libnl-core（中段 -core）
+            # 都被排除，libnl 仍能拿到 libnl200-3.12.0-r1（中段 200）。
+            # 201 实测：45 个缺单全部命中唯一文件名，6 个 feed 轮询后 HEAD 全 200。
             if [ -s "$_ak_avail" ]; then
                 _ak_real=$("$_AK_AWK" -v w="$_ak_nm" -v v="$_ak_ver" '
                     {
                         if (substr($1, 1, length(w)) != w) next
                         tail = substr($1, length(w) + 1)
-                        if (substr(tail, length(tail) - length(v)) != "-" v) next
+                        vn = length(v)
+                        if (length(tail) < vn + 1) next
+                        if (substr(tail, length(tail) - vn) != "-" v) next
+                        mid = substr(tail, 1, length(tail) - vn - 1)
+                        if (mid != "" && mid !~ /^-?[0-9][0-9.]*$/) next
                         if (best == "" || length(tail) < length(bt)) { best = $1; bt = tail }
                     }
                     END { if (best != "") print best }' "$_ak_avail")
