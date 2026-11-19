@@ -224,6 +224,33 @@ _PA_PKGONLY="$_PA_OC $_PA_CERT $_PA_DDNS $_PA_TOOLS $_PA_SSRP $_PA_DAED $_PA_HON
 # /rom/lib/apk/db/installed 的 P: 行过滤 —— 纯净 25.12 / daed 线上自动跳过，不误报。
 _PA_LIST="${CS_PROBE_APPS:-$_PA_OC $_PA_CERT $_PA_DDNS $_PA_TOOLS $_PA_SSRP $_PA_GEO $_PA_DAED $_PA_COMMON $_PA_HONK} $_PA_WEB"
 
+# 【2026-11-19 用户定】依赖组：库 + kmod 单独一组，**只在开机一次的 --repair 里补**，
+# 不进 _PA_LIST（--check / --list 继续只报应用，不把系统库当应用来报）。
+# 为什么现在能这么做：25.12 的本地库已把这 45 个库包（全是带 soname 的真名）和
+# 1204 个 kmod 全量收进来，「依赖被 apk del 掉」现在真能离线装回。
+# 2026-11-19 201 实测：apk del luci-app-openclash 连带清掉 11 个包（libruby3.4 等），
+# apk add --allow-untrusted --repositories-file /rom/root/apk-cache/repositories
+# luci-app-openclash 一次装回 11 个，617 包 / 680.0 MiB 完全复原。
+# 名字全部用「库里的真名」——白名单里的 libubox 在库里叫 libubox20260213，装包必须按真名。
+# 出厂没装过的会被 _pa_should 过滤掉（查 /rom/lib/apk/db/installed 的 P: 行），不会强加。
+_PA_DEPS="jansson4 libblkid1 libblobmsg-json20260213 libbpf1 libelf1 libgmp10 libjson-c5 libjson-script20260213 libltdl7 libmbedtls21 libmnl0 libmount1 libncurses6 libnetfilter-conntrack3 libnettle8 libnfnetlink0 libnftnl11 libnl-cli200 libnl-core200 libnl-genl200 libnl-nf200 libnl-route200 libnl-tiny1 libnl200 libopenssl3 libpcap1 libreadline8 libubox20260213 libubus20251202 libuci20250120 libucode20230711 libuuid1 libxml2-16 liblucihttp0 libcurl4 liblua5.4-5.4 liblzo2 libnghttp2-14 libruby3.4 libsqlite3-0 libuv1 libatomic1 libgcc1 libstdcpp6 libxtables12"
+
+# kmod 不写死：随内核版本变，直接从出厂库现取（201 实测 212 个，库内 212/212 都有 apk）
+_pa_kmods() {
+    grep -oE '^P:kmod-[A-Za-z0-9_.-]+' "$ROMDIR/lib/apk/db/installed" 2>/dev/null | sed 's/^P://'
+}
+
+# 依赖组里「该有却没有」的（只给 --repair 用；--check 不调它）
+_pa_missing_deps() {
+    _pa_md=""
+    for _pa_p in $_PA_DEPS $(_pa_kmods); do
+        _pa_should "$_pa_p" || continue
+        _pa_installed "$_pa_p" && continue
+        _pa_md="$_pa_md $_pa_p"
+    done
+    printf '%s\n' "$_pa_md" | sed 's/^ *//'
+}
+
 log() { printf '[APP] %s\n' "$*"; }
 
 # 【2026-10-31.0256】_pa_pm 删除：apk 是 25.12 的系统包管理器，必然在位（用户 2026-10-31 定）。
@@ -385,6 +412,19 @@ _pa_list() {
 }
 
 _pa_repair() {
+    # 【2026-11-19】依赖组先补。应用还在册、只有依赖被删时，apk add <应用> 是 no-op，
+    # 不会把依赖拉回来，所以必须点名装库/kmod 本身。
+    _pa_dm=$(_pa_missing_deps)
+    if [ -n "$_pa_dm" ]; then
+        for _pa_p in $_pa_dm; do
+            log "装回依赖 $_pa_p"
+            if _pa_add_local "$_pa_p"; then
+                log "装回完成 $_pa_p（依赖）"
+            else
+                log "装回失败 $_pa_p（本地包库没有它）"
+            fi
+        done
+    fi
     # OpenClash 内核/geo 数据不属任何包，先按 /rom 出厂副本补一次
     if ! _pa_oc_files_ok; then
         _pa_oc_files_repair
@@ -426,6 +466,7 @@ _pa_repair() {
     [ "$_pa_n" -gt 0 ] || log "无需装回（没有「该有却缺失」的应用）"
     # 装完必须重判。apk 没有缓存，直接重算即可。
     [ -z "$(_pa_missing)" ] || return 1
+    [ -z "$(_pa_missing_deps)" ] || return 1
     if ! _pa_oc_files_ok; then
         return 1
     fi
