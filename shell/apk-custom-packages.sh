@@ -114,6 +114,10 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-nfs-zh-cn"
 # 25 线只有 i18n 一条，删了就带不进整套（依次拉 luci-app-ngrokc → ngrokc）。
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-nps-zh-cn"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-p910nd-zh-cn"
+# 【2026-11-19 用户定】p910nd 是打印服务器：USB 打印机必须配这两个内核模块
+# （kmod-usb-printer 提供 usblp，kmod-lp 提供字符设备 /dev/lp*，二者都会带 kmod-ppdev）。
+# 库里一直有它们的 apk（来源 C3 全量 kmod），只是没预装进固件。
+CUSTOM_PACKAGES="$CUSTOM_PACKAGES kmod-usb-printer kmod-lp"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-sqm-zh-cn"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-ttyd-zh-cn"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-uhttpd-zh-cn"
