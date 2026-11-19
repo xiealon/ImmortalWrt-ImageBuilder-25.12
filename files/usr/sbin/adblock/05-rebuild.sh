@@ -44,7 +44,15 @@ fi
 for _p in $_PA_ADBLOCK; do
     _pa_installed "$_p" && continue
     log "从本地库装回 $_p"
-    apk add --no-network --allow-untrusted --force-overwrite "$_p" >/dev/null 2>&1
+    # 【2026-11-19 修】原来只有 --no-network —— 那会把「所有仓库」mask 掉（等于无源可用），
+    # 实测删掉 adblock 三件后，这一步必然失败、只能补配置补不回包。
+    # 改成：本地库索引存在就指过去（离线、可用），不存在才退回 --no-network。
+    if [ -s /rom/root/apk-cache/repositories ]; then
+        apk add --allow-untrusted --force-overwrite \
+            --repositories-file /rom/root/apk-cache/repositories "$_p" >/dev/null 2>&1
+    else
+        apk add --no-network --allow-untrusted --force-overwrite "$_p" >/dev/null 2>&1
+    fi
     _rc=$?
     [ "$_rc" -eq 0 ] || log "本地库装回 $_p 失败（rc=$_rc）"
 done
