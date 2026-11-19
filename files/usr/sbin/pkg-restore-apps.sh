@@ -160,7 +160,9 @@ _PA_DDNS="ddns-go luci-app-ddns-go luci-i18n-ddns-go-zh-cn"
 # 这样 --check 能同时发现「主包没了」与「依赖缺了」，--repair 一次装齐。
 _PA_TOOLS="npc luci-app-nps luci-i18n-nps-zh-cn cloudflared luci-app-cloudflared luci-i18n-cloudflared-zh-cn tailscale luci-app-tailscale-community luci-i18n-tailscale-community-zh-cn ca-bundle wget-ssl luci-compat luci-lua-runtime luci-base ip kmod-tun"
 # Web 服务器与自建中转（nginx 无界面，frp 有界面）
-_PA_WEB="nginx-full nginx-mod-stream nginx-ssl-util frpc frps luci-app-frpc luci-app-frps luci-i18n-frpc-zh-cn luci-i18n-frps-zh-cn"
+# 【2026-11-19 用户定 · A 方案】nginx 三件已从固件撤出（它会抢 80/443，把 LuCI 顶掉），
+# 保护组里同步去掉，只留 frp 四件 + 两个 i18n。
+_PA_WEB="frpc frps luci-app-frpc luci-app-frps luci-i18n-frpc-zh-cn luci-i18n-frps-zh-cn"
 # 【2026-11-18】OpenClash 的内核与 geo 数据不是包内容：build25.sh 把
 # clash_meta / GeoIP.dat / GeoSite.dat 直接写进 files/etc/openclash/ 带进固件。
 # 于是「包在册」不等于「内核在」——这三个文件被删，主界面照样打不开。
