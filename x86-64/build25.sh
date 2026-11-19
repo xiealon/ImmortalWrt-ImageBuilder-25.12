@@ -984,19 +984,35 @@ _AK_AWK="${_AK_AWK:-awk}"
 # 得到权威的 "<name>-<ver>" 列表；下载时按该名去各 feed 试，命中即止。
 _ak_avail=/tmp/ak-avail.txt
 _ak_feedlist=/tmp/ak-feedlist.txt
+_ak_cache=/tmp/ak-cache
+_ak_updlog=/tmp/ak-update.log
 : > "$_ak_avail"
 if [ -n "$_AK_BIN" ]; then
     : > "$_ak_feedlist"
     for _ak_fd0 in $_AK_FEEDS; do
         echo "$_AK_BASE/$_ak_fd0/packages.adb" >> "$_ak_feedlist"
     done
-    if "$_AK_BIN" update --repositories-file "$_ak_feedlist" >/dev/null 2>&1; then
-        "$_AK_BIN" list --available --repositories-file "$_ak_feedlist" 2>/dev/null \
-            | awk '{print $1}' > "$_ak_avail"
+    # 【2026-11-19 修 · 201 实测】上一版不带 --allow-untrusted，在 IB 宿主容器里必失败：
+    # 那里没有 /etc/apk/keys，apk 对每个 feed 报
+    #   WARNING: updating and opening .../packages.adb: UNTRUSTED signature
+    # update 退出码非 0 → if 落到 else → 回退 index.json 猜名 → 45 个库包 404
+    # （jansson / libubox / libxml2 / libruby / libstdcpp / libnl* 全在缺单里）。
+    # 201 实测对照（空 keys 目录）：
+    #   不带 allow-untrusted → 「3 unavailable, 0 stale; 618 distinct packages」
+    #   带  --allow-untrusted → 「OK: 10698 distinct packages available」
+    # 另：--cache-dir 指的目录必须先建好，否则 apk 直接报 "Unable to setup the cache"。
+    mkdir -p "$_ak_cache"
+    if "$_AK_BIN" --allow-untrusted --cache-dir "$_ak_cache" update \
+            --repositories-file "$_ak_feedlist" >"$_ak_updlog" 2>&1; then
+        "$_AK_BIN" --allow-untrusted --cache-dir "$_ak_cache" list --available \
+            --repositories-file "$_ak_feedlist" 2>/dev/null | awk '{print $1}' > "$_ak_avail"
         echo "==> [apk-cache] 索引快照：$(wc -l < "$_ak_avail") 个可用包（用于真实文件名）"
     else
-        echo "::warning::apk update 失败，回退到 index.json 猜名"
+        echo "::error::apk update 失败，只能回退 index.json 猜名（前 8 行原因见下）"
+        sed -n '1,8p' "$_ak_updlog" 2>/dev/null
     fi
+    [ -s "$_ak_avail" ] || \
+        echo "::error::索引快照为空 —— 真实文件名拿不到，库内会缺一批带 soname 后缀的库包"
 fi
 
 if [ -n "$_AK_DL" ]; then
@@ -1060,9 +1076,20 @@ if [ -n "$_AK_DL" ]; then
             [ "$_ak_keep" = "1" ] && continue
             # 先按索引快照里的真实包名拼文件名（libubox -> libubox20260213-<ver>）
             _ak_fn="$_ak_nm-$_ak_ver.apk"
+            # 【2026-11-19 修】原来靠正则 "^w[0-9.-]*-v$"：版本里带 ~ 时虽能靠字面匹配过，
+            # 但 libnl 会先撞上 libnl-core-<同版本>（前缀也满足），拿到错的包名。
+            # 改成纯字符串比较：前缀必须等于 w，尾巴必须正好是 "-<版本>"；
+            # 多个命中取尾巴最短的那个（=精确名优先，libnl 不会吃掉 libnl-core）。
+            # 201 实测：45 个缺单全部命中，抽检 12 个 HEAD 全 200。
             if [ -s "$_ak_avail" ]; then
-                _ak_real=$("$_AK_AWK" -v w="$_ak_nm" -v v="$_ak_ver" \
-                    '$1 ~ ("^" w "[0-9.-]*-" v "$") { print $1; exit }' "$_ak_avail")
+                _ak_real=$("$_AK_AWK" -v w="$_ak_nm" -v v="$_ak_ver" '
+                    {
+                        if (substr($1, 1, length(w)) != w) next
+                        tail = substr($1, length(w) + 1)
+                        if (substr(tail, length(tail) - length(v)) != "-" v) next
+                        if (best == "" || length(tail) < length(bt)) { best = $1; bt = tail }
+                    }
+                    END { if (best != "") print best }' "$_ak_avail")
                 [ -n "$_ak_real" ] && _ak_fn="$_ak_real.apk"
             fi
             # 先试「当前 feed」（名字就是从它的 index.json 里查到的），命中就不再来回试，
