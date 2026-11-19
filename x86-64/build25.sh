@@ -1065,13 +1065,20 @@ if [ -n "$_AK_DL" ]; then
                     '$1 ~ ("^" w "[0-9.-]*-" v "$") { print $1; exit }' "$_ak_avail")
                 [ -n "$_ak_real" ] && _ak_fn="$_ak_real.apk"
             fi
+            # 先试「当前 feed」（名字就是从它的 index.json 里查到的），命中就不再来回试，
+            # 未命中才轮询其余 feed；探测失败静默（curl -fsSL 的 404 会刷屏，容易误判成构建失败）
             _ak_ok=0
-            for _ak_fd2 in $_AK_FEEDS; do
-                if _ak_dl "$_AK_BASE/$_ak_fd2/$_ak_fn" "$_AK_DIR/$_ak_fn"; then
-                    _ak_ok=1
-                    break
-                fi
-            done
+            if _ak_dl "$_ak_u/$_ak_fn" "$_AK_DIR/$_ak_fn" 2>/dev/null; then
+                _ak_ok=1
+            else
+                for _ak_fd2 in $_AK_FEEDS; do
+                    [ "$_AK_BASE/$_ak_fd2" = "$_ak_u" ] && continue
+                    if _ak_dl "$_AK_BASE/$_ak_fd2/$_ak_fn" "$_AK_DIR/$_ak_fn" 2>/dev/null; then
+                        _ak_ok=1
+                        break
+                    fi
+                done
+            fi
             if [ "$_ak_ok" = "1" ]; then
                 _ak_b=$((_ak_b + 1))
                 [ "$_ak_fn" != "$_ak_nm-$_ak_ver.apk" ] && \
