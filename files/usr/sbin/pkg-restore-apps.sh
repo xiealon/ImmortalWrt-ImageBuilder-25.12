@@ -308,7 +308,15 @@ _pa_should() {
     # 都会被判成「该有」。2026-10-29 真机复现：ssrp 组 5 个包被判缺失，第 3 轮
     # --repair 把 xray-core / xray-plugin 装了上去（运行时 624 vs 出厂 622）——
     # 这不是修复，是把用户没选的应用强加给机器。
-    grep -qxF "P:$1" "$ROMDIR/lib/apk/db/installed" 2>/dev/null
+    grep -qxF "P:$1" "$ROMDIR/lib/apk/db/installed" 2>/dev/null && return 0
+    # 【2026-11-19】别名表：白名单里写的是「能力名」，固件装的可能是另一个包名。
+    # 实测：固件出厂的 /usr/bin/ip 来自 ip-full-6.18.0-r2，库里没有 P:ip 这一行，
+    # 于是 --list 一直把 ip 显示成「固件未带」而被永久跳过（功能没坏，只是判据落空）。
+    # 这里按 能力名 → 实际包名 做一次兜底，避免再出现「写了等于没写」的条目。
+    case "$1" in
+    ip) grep -qxF "P:ip-full" "$ROMDIR/lib/apk/db/installed" 2>/dev/null ;;
+    *) return 1 ;;
+    esac
 }
 
 # 已装包的「运行数据还在吗」补充判据（v.180.167）。
