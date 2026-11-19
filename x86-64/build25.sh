@@ -975,6 +975,30 @@ _ak_dl() {
 
 _ak_b=0
 _ak_miss=""
+_AK_AWK="${_AK_AWK:-awk}"
+# 【2026-11-19】用 apk 自己的索引拿「真实包名-版本」，不再靠 index.json 猜文件名。
+# 原因：index.json 的键是源包名（libubox/libxml2/libruby），而仓库里的文件叫
+# libubox20260213-<ver>.apk、libxml2-16-<ver>.apk、libruby3.4-<ver>.apk，
+# 猜名会 404（实测 35 个包因此没进库，含 openclash 依赖的 libruby3.4）。
+# 做法：写一个只含官方源的临时 repositories 文件，apk update 后 list --available，
+# 得到权威的 "<name>-<ver>" 列表；下载时按该名去各 feed 试，命中即止。
+_ak_avail=/tmp/ak-avail.txt
+_ak_feedlist=/tmp/ak-feedlist.txt
+: > "$_ak_avail"
+if [ -n "$_AK_BIN" ]; then
+    : > "$_ak_feedlist"
+    for _ak_fd0 in $_AK_FEEDS; do
+        echo "$_AK_BASE/$_ak_fd0/packages.adb" >> "$_ak_feedlist"
+    done
+    if "$_AK_BIN" update --repositories-file "$_ak_feedlist" >/dev/null 2>&1; then
+        "$_AK_BIN" list --available --repositories-file "$_ak_feedlist" 2>/dev/null \
+            | awk '{print $1}' > "$_ak_avail"
+        echo "==> [apk-cache] 索引快照：$(wc -l < "$_ak_avail") 个可用包（用于真实文件名）"
+    else
+        echo "::warning::apk update 失败，回退到 index.json 猜名"
+    fi
+fi
+
 if [ -n "$_AK_DL" ]; then
     # 【v.180.133】_AK_WANT 是多行字符串，原来只 tr ' ' '|' 换空格，换行还在。
     # 而 pattern 外面套的是 "(...)"：换行会把整个正则拆成 12 条残缺片段 ——
@@ -1034,21 +1058,26 @@ if [ -n "$_AK_DL" ]; then
                 fi
             done
             [ "$_ak_keep" = "1" ] && continue
+            # 先按索引快照里的真实包名拼文件名（libubox -> libubox20260213-<ver>）
             _ak_fn="$_ak_nm-$_ak_ver.apk"
-            if _ak_dl "$_ak_u/$_ak_fn" "$_AK_DIR/$_ak_fn"; then
-                _ak_b=$((_ak_b + 1))
-            else
-                # 2026-11-18: index.json 的键是源包名，落盘文件名可能带 soname 数字。
-                # 实测 base feed: libpcap-1.10.6-r1.apk 是 404,
-                #                 libpcap1-1.10.6-r1.apk 是 200 (120,027 B)。
-                # 所以直取失败后再用 <name>1-<ver>.apk 试一次，命中就记一笔。
-                _ak_alt="${_ak_nm}1-$_ak_ver.apk"
-                if _ak_dl "$_ak_u/$_ak_alt" "$_AK_DIR/$_ak_alt"; then
-                    _ak_b=$((_ak_b + 1))
-                    echo "==> [apk-cache] 别名命中: $_ak_nm -> $_ak_alt"
-                else
-                    _ak_miss="$_ak_miss $_ak_nm"
+            if [ -s "$_ak_avail" ]; then
+                _ak_real=$("$_AK_AWK" -v w="$_ak_nm" -v v="$_ak_ver" \
+                    '$1 ~ ("^" w "[0-9.-]*-" v "$") { print $1; exit }' "$_ak_avail")
+                [ -n "$_ak_real" ] && _ak_fn="$_ak_real.apk"
+            fi
+            _ak_ok=0
+            for _ak_fd2 in $_AK_FEEDS; do
+                if _ak_dl "$_AK_BASE/$_ak_fd2/$_ak_fn" "$_AK_DIR/$_ak_fn"; then
+                    _ak_ok=1
+                    break
                 fi
+            done
+            if [ "$_ak_ok" = "1" ]; then
+                _ak_b=$((_ak_b + 1))
+                [ "$_ak_fn" != "$_ak_nm-$_ak_ver.apk" ] && \
+                    echo "==> [apk-cache] 索引名命中: $_ak_nm -> $_ak_fn"
+            else
+                _ak_miss="$_ak_miss $_ak_nm"
             fi
         done
     done
