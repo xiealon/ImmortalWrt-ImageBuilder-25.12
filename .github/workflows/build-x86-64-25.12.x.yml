@@ -80,11 +80,11 @@ on:
           - '64G盘→rootfs 50G'
           - '128G盘→rootfs 108G'
           - '256G盘→rootfs 224G'
-      Enable Store:
-        description: "集成 store 商店"
-        required: false
-        type: boolean
-        default: true
+      # 【2026-11-20 用户定】原来的「Enable Store」开关已删除。
+      # store 跟 lxc / docker 一样是固件的一部分，不给这个组合留门 —— 理由与下面
+      # Crowdsec 那条完全相同：选 false 会产出一个「界面上没有商店、但白名单/脚本/包库
+      # 全都按有商店写好」的固件，属于最难查的那种不一致。想卸就直接在设备上 apk del，
+      # 包库里有 apk，开机补充组也能装回。
       # 【v.107.7】原来这里有个 Include Crowdsec=yes/no 开关，已删除。
       # 容器是固件的一部分，不是可选件。留开关的后果：选 no 时 185MB 镜像不进固件，
       # 而 Router IP / 掩码 / 网关 / DNS 照样写进 custom/*.txt、由开机引导的
@@ -259,14 +259,13 @@ jobs:
           echo "        DNS=[$(tr -d '\r\n' < "$CUSTOM/custom_router_dns.txt")]"
 
 
-      - name: Enable Store Integration
+      - name: Enable Store Integration（固定启用）
         run: |
-          if [ "${{ github.event.inputs['Enable Store'] }}" == "true" ]; then
-            echo 'CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-store"' >> shell/apk-custom-packages.sh
-            echo "✅ 已追加 luci-app-store"
-          else
-            echo "❎ 未启用 luci-app-store"
-          fi
+          # 【2026-11-20 用户定】store 不再给开关：跟 lxc / docker 一样，它是固件的一部分。
+          # 以前选 false 会得到「界面没商店、但白名单/脚本/包库都按有商店写」的固件，
+          # 属于最难查的不一致；想卸就在设备上 apk del，库里和开机补充组都能装回。
+          echo 'CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-store"' >> shell/apk-custom-packages.sh
+          echo "✅ 已追加 luci-app-store（固定启用）"
 
       - name: Lint Shell Scripts
         run: |
