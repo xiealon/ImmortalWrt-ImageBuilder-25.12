@@ -143,6 +143,9 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES smartdns"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-smartdns"
 
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES dockerd luci-app-dockerman luci-i18n-dockerman-zh-cn"
+# 【2026-11-20 用户定】luci-app-store（商店）固定随固件走 —— 与 lxc / docker 同一档，
+# 不再提供构建开关（workflow 里的「Enable Store」已删除，改由构建步骤无条件追加一行）。
+# 想卸就在设备上 apk del luci-app-store，包库里有 apk，开机补充组也认得它。
 
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES crowdsec-firewall-bouncer"
 # nftables-json /usr/sbin/nft 归属这个包（2026-10-27 真机核实）：bouncer 的 deny_action=drop
