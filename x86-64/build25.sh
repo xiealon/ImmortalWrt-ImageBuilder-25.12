@@ -667,40 +667,7 @@ mkdir -p "$_AK_DIR"
 #
 # 注意：下面是**双引号字符串**，注释只能写在起始引号之前。写在里面的 `#`
 # 不是注释，会被当成包名的一部分（v.180.167 踩过这个坑）。
-_AK_WANT="lxc lxc-attach lxc-auto lxc-autostart lxc-cgroup lxc-checkconfig lxc-common lxc-config
-lxc-configs lxc-console lxc-copy lxc-create lxc-destroy lxc-device lxc-execute lxc-freeze
-lxc-hooks lxc-info lxc-init lxc-ls lxc-monitor lxc-snapshot lxc-start lxc-stop
-lxc-templates lxc-top lxc-unfreeze lxc-unshare lxc-usernsexec lxc-wait liblxc rpcd-mod-lxc
-luci-app-lxc luci-i18n-lxc-zh-cn smartdns luci-app-smartdns mosdns daed daed-geoip daed-geosite
-luci-app-daed luci-i18n-daed-zh-cn crowdsec-firewall-bouncer luci-app-crowdsec-firewall-bouncer luci-i18n-crowdsec-firewall-bouncer-zh-cn nftables-json v2ray-geoip v2ray-geosite
-sing-box geoview adblock luci-app-adblock luci-i18n-adblock-zh-cn coreutils-stat coreutils-nohup sqlite3-cli
-coreutils-base64 curl dnsmasq-full ip-full jq libuci-lua luci-compat luci-lua-runtime
-lyaml microsocks nping resolveip unzip xz-utils libc libev
-libsodium libudns libpcap libyaml coreutils-stty script-utils ruby ruby-yaml
-btrfs-progs ca-certificates cgi-io containerd docker docker-compose dockerd iptables-mod-extra
-libattr libcap liblucihttp-ucode libpthread librt libseccomp libwebsockets-full luci-app-dockerman
-luci-base luci-i18n-dockerman-zh-cn rpcd rpcd-mod-file rpcd-mod-luci rpcd-mod-ucode runc tini
-ttyd ucode ucode-mod-fs ucode-mod-html ucode-mod-log ucode-mod-math ucode-mod-socket ucode-mod-ubus
-ucode-mod-uci zlib bash ca-bundle jansson libblobmsg-json libbpf libcurl
-libelf libgcc libgmp libjson-c liblucihttp-lua liblucihttp libmnl libncurses
-libnetfilter-conntrack libnettle libnfnetlink libnftnl libnl-tiny libopenssl libreadline libubox
-libubus-lua libubus libuci libucode lua luci-lib-base luci-lib-ip luci-lib-jsonc
-luci-lib-nixio ruby-bigdecimal ruby-date ruby-digest ruby-enc ruby-pstore ruby-psych ruby-stringio
-terminfo ucode-mod-lua liblua5.1 libnghttp2 libruby acme-acmesh acme-common luci-app-acme
-luci-i18n-acme-zh-cn ddns-go luci-app-ddns-go luci-i18n-ddns-go-zh-cn openssl-util socat wget-ssl aria2
-aria2-openssl ariang cloudflared ksmbd-server libblkid libjson-script liblzo libmount
-libnl-cli libnl-core libnl-genl libnl-nf libnl-route libnl libopenssl-conf libopenssl-legacy
-libpcre2 libstdcpp libtirpc libuuid libuv libwrap libxtables lsqlite3
-luci-app-aria2 luci-app-cloudflared luci-app-filemanager luci-app-nps luci-app-tailscale-community nfs-kernel-server nfs-utils npc
-rpcbind tailscale uhttpd libsqlite3 libxml2 luci-i18n-nps-zh-cn luci-i18n-cloudflared-zh-cn luci-i18n-tailscale-community-zh-cn
-luci-i18n-aria2-zh-cn luci-i18n-filemanager-zh-cn libatomic libltdl liblua5.4 libmbedtls frpc frps
-luci-app-frpc luci-app-frps luci-i18n-frpc-zh-cn luci-i18n-frps-zh-cn nginx-full nginx-mod-stream nginx-ssl-util
-libacl libbz2 libcap-ng libcomerr libdbus libe2p libext2fs libf2fs libfdisk libffi libiptext libiwinfo libiwinfo-data liblua liblzma libparted libsensors libsmartcols libss libsysfs libuclient libudebug libustream-openssl libzstd
-luci-app-3ginfo-lite luci-app-adblock luci-app-cifs-mount luci-app-diskman luci-app-email luci-app-firewall luci-app-hd-idle luci-app-ksmbd luci-app-nfs luci-app-openvpn luci-app-p910nd luci-app-package-manager luci-app-sqm luci-app-timewol luci-app-ttyd luci-app-uhttpd luci-app-upnp luci-app-wechatpush
-bc f2fs-tools f2fsck losetup resize2fs e2fsprogs tune2fs blkid
-p910nd
-gawk coreutils-sort rpcd-mod-rpcsys luci-i18n-adblock-zh-cn luci-app-smartdns luci-i18n-smartdns-zh-cn
-luci-i18n-3ginfo-lite-zh-cn luci-i18n-cifs-mount-zh-cn luci-i18n-diskman-zh-cn luci-i18n-email-zh-cn luci-i18n-firewall-zh-cn luci-i18n-hd-idle-zh-cn luci-i18n-ksmbd-zh-cn luci-i18n-nfs-zh-cn luci-i18n-openvpn-zh-cn luci-i18n-p910nd-zh-cn luci-i18n-package-manager-zh-cn luci-i18n-rtp2httpd-zh-cn luci-i18n-sqm-zh-cn luci-i18n-timewol-zh-cn luci-i18n-ttyd-zh-cn luci-i18n-uhttpd-zh-cn luci-i18n-upnp-zh-cn luci-i18n-wechatpush-zh-cn"
+_AK_WANT="lxc lxc-attach lxc-auto lxc-autostart lxc-cgroup lxc-checkconfig lxc-common lxc-config lxc-configs lxc-console lxc-copy lxc-create lxc-destroy lxc-device lxc-execute lxc-freeze lxc-hooks lxc-info lxc-init lxc-ls lxc-monitor lxc-snapshot lxc-start lxc-stop lxc-templates lxc-top lxc-unfreeze lxc-unshare lxc-usernsexec lxc-wait liblxc rpcd-mod-lxc luci-app-lxc luci-i18n-lxc-zh-cn smartdns luci-app-smartdns mosdns daed daed-geoip daed-geosite luci-app-daed luci-i18n-daed-zh-cn crowdsec-firewall-bouncer luci-app-crowdsec-firewall-bouncer luci-i18n-crowdsec-firewall-bouncer-zh-cn nftables-json v2ray-geoip v2ray-geosite sing-box geoview coreutils-stat coreutils-nohup sqlite3-cli coreutils-base64 curl dnsmasq-full ip-full jq libuci-lua luci-compat luci-lua-runtime lyaml microsocks nping resolveip unzip xz-utils libc libev libsodium libudns libpcap libyaml coreutils-stty script-utils ruby ruby-yaml btrfs-progs ca-certificates cgi-io containerd docker docker-compose dockerd iptables-mod-extra libattr libcap liblucihttp-ucode libpthread librt libseccomp libwebsockets-full luci-app-dockerman luci-base luci-i18n-dockerman-zh-cn rpcd rpcd-mod-file rpcd-mod-luci rpcd-mod-ucode runc tini ttyd ucode ucode-mod-fs ucode-mod-html ucode-mod-log ucode-mod-math ucode-mod-socket ucode-mod-ubus ucode-mod-uci zlib bash ca-bundle jansson libblobmsg-json libbpf libcurl libelf libgcc libgmp libjson-c liblucihttp-lua liblucihttp libmnl libncurses libnetfilter-conntrack libnettle libnfnetlink libnftnl libnl-tiny libopenssl libreadline libubox libubus-lua libubus libuci libucode lua luci-lib-base luci-lib-ip luci-lib-jsonc luci-lib-nixio ruby-bigdecimal ruby-date ruby-digest ruby-enc ruby-pstore ruby-psych ruby-stringio terminfo ucode-mod-lua liblua5.1 libnghttp2 libruby acme-acmesh acme-common luci-app-acme luci-i18n-acme-zh-cn ddns-go luci-app-ddns-go luci-i18n-ddns-go-zh-cn openssl-util socat wget-ssl aria2 aria2-openssl ariang cloudflared ksmbd-server libblkid libjson-script liblzo libmount libnl-cli libnl-core libnl-genl libnl-nf libnl-route libnl libopenssl-conf libopenssl-legacy libpcre2 libstdcpp libtirpc libuuid libuv libwrap libxtables lsqlite3 luci-app-aria2 luci-app-cloudflared luci-app-filemanager luci-app-nps luci-app-tailscale-community nfs-kernel-server nfs-utils npc rpcbind tailscale uhttpd libsqlite3 libxml2 luci-i18n-nps-zh-cn luci-i18n-cloudflared-zh-cn luci-i18n-tailscale-community-zh-cn luci-i18n-aria2-zh-cn luci-i18n-filemanager-zh-cn libatomic libltdl liblua5.4 libmbedtls frpc frps luci-app-frpc luci-app-frps luci-i18n-frpc-zh-cn luci-i18n-frps-zh-cn nginx-full nginx-mod-stream nginx-ssl-util libacl libbz2 libcap-ng libcomerr libdbus libe2p libext2fs libf2fs libfdisk libffi libiptext libiwinfo libiwinfo-data liblua liblzma libparted libsensors libsmartcols libss libsysfs libuclient libudebug libustream-openssl libzstd luci-app-3ginfo-lite luci-app-cifs-mount luci-app-diskman luci-app-email luci-app-firewall luci-app-hd-idle luci-app-ksmbd luci-app-nfs luci-app-openvpn luci-app-p910nd luci-app-package-manager luci-app-sqm luci-app-timewol luci-app-ttyd luci-app-uhttpd luci-app-upnp luci-app-wechatpush bc f2fs-tools f2fsck losetup resize2fs e2fsprogs tune2fs blkid p910nd luci-app-smartdns luci-i18n-smartdns-zh-cn luci-i18n-3ginfo-lite-zh-cn luci-i18n-cifs-mount-zh-cn luci-i18n-diskman-zh-cn luci-i18n-email-zh-cn luci-i18n-firewall-zh-cn luci-i18n-hd-idle-zh-cn luci-i18n-ksmbd-zh-cn luci-i18n-nfs-zh-cn luci-i18n-openvpn-zh-cn luci-i18n-p910nd-zh-cn luci-i18n-package-manager-zh-cn luci-i18n-rtp2httpd-zh-cn luci-i18n-sqm-zh-cn luci-i18n-timewol-zh-cn luci-i18n-ttyd-zh-cn luci-i18n-uhttpd-zh-cn luci-i18n-upnp-zh-cn luci-i18n-wechatpush-zh-cn"
 
 # 来源 A：packages/ 里 run 包解出的 apk（第三方包，官方源没有）
 #
