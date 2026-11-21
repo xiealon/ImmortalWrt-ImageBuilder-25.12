@@ -164,13 +164,12 @@ jobs:
           # 必须带执行位，否则开机后 guard 调不动、探针 120 秒循环也起不来。
           for _x in files/usr/sbin/bootstrap/bootstrap.sh \
                     files/usr/sbin/crowdsec-guard-watch.sh \
-                    files/usr/sbin/smartdns-restore/restore.sh \
-                    files/usr/sbin/adblock/restore.sh; do
+                    files/usr/sbin/smartdns-restore/restore.sh; do
             [ -x "${{ github.workspace }}/$_x" ] \
               || { echo "::error::$_x 无执行位（拆分后的自愈入口）"; exit 1; }
           done
           _n_sh=$(find "${{ github.workspace }}/files/usr/sbin" -type f -name '*.sh' | wc -l)
-          echo "==> files/usr/sbin 全树 .sh 共 $_n_sh 个（含 bootstrap/smartdns-restore/adblock 子目录）"
+          echo "==> files/usr/sbin 全树 .sh 共 $_n_sh 个（含 bootstrap/smartdns-restore 子目录）"
 
       # 先把 runner 自带、本构建完全用不到的工具链删掉。
       # 实测 GitHub 托管 runner 是 146G 盘（不是文档里说的 14G），清完剩 109G 可用，
