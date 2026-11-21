@@ -37,7 +37,7 @@ log() { printf '[PKG] %s\n' "$*"; }
 # /etc/smartdns/ 下必须存在的规则文件（与构建期固化进固件的那批一致）
 SD_CONF_FILES="address.conf blacklist-ip.conf custom.conf domain-block.list domain-forwarding.list"
 
-# localhost 本地解析 —— adblock 探活的活路（原 L83-99 依据整段保留在原脚本，
+# localhost 本地解析 —— DNS 探活的活路（原 L83-99 依据整段保留在原脚本，
 # 这里只留判据用的整行文本）。落点是 custom.conf 而不是 uci：
 # uci 的 domain-rule 段 init 不认，写了也白写；init 生成的 smartdns.conf 里
 # 有 `conf-file /etc/smartdns/custom.conf`，往该文件追加整行才生效。
