@@ -217,8 +217,8 @@ _PA_HONK="honk luci-app-honk"
 # 固件装 adblock / luci-app-adblock / luci-i18n-adblock-zh-cn 三件，
 # 屏蔽表、feed、DNS 对接全留给用户在 LuCI 里开；原先的专用四态脚本
 # （/usr/sbin/adblock/restore.sh 那套会写 uci、重建名单）已整体删除。
-_PA_ADBLOCK="adblock luci-app-adblock luci-i18n-adblock-zh-cn"
-_PA_PKGONLY="$_PA_OC $_PA_CERT $_PA_DDNS $_PA_TOOLS $_PA_SSRP $_PA_DAED $_PA_HONK $_PA_WEB $_PA_ADBLOCK"
+# 【2026-11-21 用户定】adblock 整套移除，故 _PA_ADBLOCK 组删除。
+_PA_PKGONLY="$_PA_OC $_PA_CERT $_PA_DDNS $_PA_TOOLS $_PA_SSRP $_PA_DAED $_PA_HONK $_PA_WEB"
 
 # 【2026-11-02】daed 在 25.12 线已被 honk 取代（用户定），原来的 geo 软链接判据一并删除：
 #   honk 的规则集不走 /usr/share/daed/*.dat 软链接，而是按 native_api.geosite_download_url /
@@ -229,7 +229,7 @@ _PA_PKGONLY="$_PA_OC $_PA_CERT $_PA_DDNS $_PA_TOOLS $_PA_SSRP $_PA_DAED $_PA_HON
 # 【2026-11-10】_PA_HONK 并入清单：_PA_PKGONLY 原本写了 honk 三包却不进 _PA_LIST，
 # 等于「判据写了、范围没进去」，只有 honk 变体才该有这三个包，靠 _pa_should 按
 # /rom/lib/apk/db/installed 的 P: 行过滤 —— 纯净 25.12 / daed 线上自动跳过，不误报。
-_PA_LIST="${CS_PROBE_APPS:-$_PA_OC $_PA_CERT $_PA_DDNS $_PA_TOOLS $_PA_SSRP $_PA_GEO $_PA_DAED $_PA_COMMON $_PA_HONK} $_PA_WEB $_PA_ADBLOCK"
+_PA_LIST="${CS_PROBE_APPS:-$_PA_OC $_PA_CERT $_PA_DDNS $_PA_TOOLS $_PA_SSRP $_PA_GEO $_PA_DAED $_PA_COMMON $_PA_HONK} $_PA_WEB"
 
 # 【2026-11-19 用户定】依赖组：库 + kmod 单独一组，**只在开机一次的 --repair 里补**，
 # 不进 _PA_LIST（--check / --list 继续只报应用，不把系统库当应用来报）。
