@@ -3,11 +3,10 @@
 #
 # 拆分自 pkg-restore-smartdns.sh 的 _sd_localrule_ok() / _sd_localrule()。
 #
-# 为什么需要它：adblock 4.5.x 的 f_dnsup() 用 `nslookup localhost.` 判 DNS 后端
-# 是否起来（adblock.sh 第 80 行 adb_lookupdomain="localhost"，硬编码）。
-# smartdns 对 localhost 回 NXDOMAIN → nslookup 退出码 1 → adblock 判失败，
-# 30 次轮询 × 1 秒后打 "dns backend restart with adblock blocklist failed"。
-# 列表其实照样生成并已被 conf-file 引入，功能没坏，只是每次 reload 白等 30 秒。
+# 为什么需要它：不少脚本把 localhost 当 DNS 探活域名（`nslookup localhost.`，
+# 硬编码写死在脚本里）。smartdns 若对 localhost 回 NXDOMAIN，nslookup 退出码 1，
+# 会被判成「DNS 后端没起来」：30 次轮询 × 1 秒后打一条假失败，功能其实没坏，
+# 只是白白等 30 秒。给 localhost 一条本地解析即可。
 #
 # 判据：整行精确匹配（grep -xF），不是子串 ——
 # 否则 address /localhost/127.0.0.2 这种也会被判成已配好。
