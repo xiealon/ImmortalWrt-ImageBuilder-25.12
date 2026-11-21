@@ -1,11 +1,10 @@
 #!/bin/sh
-# R35：smartdns 的 localhost 本地解析（adblock 探活的依赖）
+# R35：smartdns 的 localhost 本地解析（DNS 探活的依赖）
 #
 # 背景（2026-11-07 真机 H3C C100 / ImmortalWrt 25.12.2 / smartdns 48.4）：
-#   adblock 4.5.x 的 f_dnsup() 用 `nslookup localhost.` 判 DNS 后端起没起
-#   （adblock.sh 第 80 行 adb_lookupdomain="localhost"，硬编码）。smartdns 对
-#   localhost 回 NXDOMAIN，nslookup 退出码 1，adblock 判失败，每次 reload 白等
-#   30 秒并打 "dns backend restart with adblock blocklist failed"。
+#   不少脚本把 localhost 当 DNS 探活域名（`nslookup localhost.` 硬编码）。
+#   smartdns 对 localhost 回 NXDOMAIN，nslookup 退出码 1，会被判成 DNS 没起来，
+#   每次重试白等 30 秒并打一条假失败。
 #
 # 落点为什么是 custom.conf 而不是 uci：
 #   真机上写 config domain-rule + domain/address 之后，/var/etc/smartdns/
