@@ -60,13 +60,7 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-3ginfo-lite-zh-cn"
 # 【2026-11-18】lucky 撤掉，换回专用工具：证书 acme / DDNS ddns-go
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES acme-acmesh acme-common luci-app-acme luci-i18n-acme-zh-cn"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES ddns-go luci-app-ddns-go luci-i18n-ddns-go-zh-cn"
-# 【2026-11-02】adblock：先留着（用户当日改回）。
-# 这条链是 i18n → luci-app-adblock → adblock，写一行三个全装，imm25.config 里
-# CONFIG_PACKAGE_adblock / CONFIG_PACKAGE_luci-app-adblock 都是 not set，
-# 所以固件里有没有这套，全看这一行在不在 —— 别处不用改。
-# 加了它就要一起进 pkg-restore-apps.sh 的 _PA_ADBLOCK 保护组：
-# 单独留在清单里、却不在保护表里，等于「装上了但被 apk del 掉没人管」。
-# 【2026-11-21 用户定】adblock 整套移除：不再装 adblock / luci-app-adblock / luci-i18n-adblock-zh-cn，也不预置名单。
+# 【2026-11-21 用户定】adblock 整套不装：不再安装 adblock / luci-app-adblock / luci-i18n-adblock-zh-cn。
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-aria2-zh-cn"
 # 【2026-11-02】banip 移除（用户定：用不到）。
 # 当日 201 实测：三个包都在、init.d 是 ENABLED，但 option ban_enabled '0'、
