@@ -196,17 +196,9 @@ else
     rm -f files/usr/share/v2ray/geosite.dat files/usr/share/v2ray/geoip.dat
 fi
 
-# 【2026-11-18】adblock 本地屏蔽表：Loyalsoldier reject-list.txt（纯域名，一行一个）。
-# adblock 4.x 会把它当 blocklist 无条件并入屏蔽集（/etc/adblock/adblock.blocklist），
-# 不需要 feed、不联网。用户在 LuCI 里更新 adblock 也不会动这个文件。
-mkdir -p files/etc/adblock
-LG_REJECT="https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/reject-list.txt"
-if wget -q "$LG_REJECT" -O files/etc/adblock/adblock.blocklist; then
-    echo "✅ adblock 本地屏蔽表已注入：$(stat -c%s files/etc/adblock/adblock.blocklist) B"
-else
-    echo "::warning::reject-list.txt 下载失败，adblock 用原有配置"
-    rm -f files/etc/adblock/adblock.blocklist
-fi
+# 【2026-11-21 用户定】adblock 不再预置任何配置/名单：固件只装包（adblock 三件），
+# 屏蔽表、feed、DNS 对接统统交给用户在 LuCI 里自己开。原构建期注入
+# Loyalsoldier reject-list.txt → files/etc/adblock/adblock.blocklist 的整段已删除。
     URL=$(curl -s https://api.github.com/repos/vernesong/OpenClash/releases/latest \
       | grep "browser_download_url.*apk" \
       | head -n1 \
