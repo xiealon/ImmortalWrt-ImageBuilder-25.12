@@ -9,7 +9,7 @@ SROOT="${CS_SCRIPT_ROOT-/rom}"
 #
 # 为什么需要它：
 #   guard 原来只由探针调用。探针主循环 2026-11-09 改成 600 秒之后，
-#   「/usr/sbin/{bootstrap,smartdns,adblock} 被删/被改」的最坏恢复时间也跟着
+#   「/usr/sbin/{bootstrap,smartdns-restore} 被删/被改」的最坏恢复时间也跟着
 #   从 60 秒变成 10 分钟。而目录完整性检查不碰容器、不做 lxc-attach，
 #   开销只有一次 find + md5，跟探测频率没有因果关系，没理由被它拖着。
 #   所以拆成独立触发：guard 每 120 秒跑一次，探针仍保持 600 秒。
