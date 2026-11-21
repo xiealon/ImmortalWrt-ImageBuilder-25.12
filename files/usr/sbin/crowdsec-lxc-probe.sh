@@ -481,7 +481,7 @@ _up_watch() {
         # 【2026-11-07】只缺 custom.conf 里那行 localhost 本地解析。
         # 不能走 conf 模式 —— --conf 只追加一行、不重启 smartdns，规则不会载入；
         # 必须走 --config（重写配置 + 重启），代价是十几秒 DNS 中断，
-        # 但缺着不修的后果是 adblock 每次 reload 白等 30 秒并打假失败。
+        # 但缺着不修的后果是各类 DNS 探活每次重试白等 30 秒并打假失败。
         _uw_why="localhost 本地解析缺失（53 仍由 smartdns 接管，改 custom.conf 需重启生效）"
         _uw_mode="config"
     elif [ "$_uw_svc" != "0" ]; then
@@ -655,8 +655,6 @@ _apps_watch() {
     #   ② 就算有这个参数，代理内核也**不该**重建 —— clashoo / daed / honk 的配置是
     #      用户导入订阅生成的，删掉重装只回出厂骨架，config.yaml / 节点 / 规则全丢。
     #      这正是 _PA_PKGONLY 把它们限制成「只判包级」的原因。
-    #   ③ adblock 那种「删了能重装」的组已经独立在 /usr/sbin/adblock/05-rebuild.sh，
-    #      由它自己的 restore.sh 调度，不走这里。
     # 现在的节奏：装回失败 → 计数 → 600 秒冷却后再试 → 连续 3 次转人工。
     if [ "$P_APP_FIX" -ge "$PROBE_FAIL_ALERT" ]; then
         P_ACTION="app-need-human"
@@ -1254,7 +1252,7 @@ while true; do
     # 本通道的 kmods-* 标签要最后落盘才看得见。
     # 代价：每轮多一次 --deps --check（只读包内清单 + [ -e ]，实测约 6 ms）。
     # 【2026-11-14 用户定】应用包与依赖文件的恢复只在**开机**跑一次（rc.local L152-175），
-    # 不再进探针主循环 —— 与 adblock（rc.local L177）同节奏。
+    # 不再进探针主循环。
     # 理由：包被删不影响转发，开机补一次够用；探针只留 last_pull / DNS / 网络 / bouncer。
     # 函数定义保留在下方，需要挂回时把下面两行的注释去掉即可。
     # _kmods_watch
