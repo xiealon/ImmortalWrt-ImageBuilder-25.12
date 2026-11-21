@@ -19,7 +19,9 @@
 #   pkg-restore-apps.sh [--repair]  装回缺的那些，再复判一次
 #                                   0 = 全部在位；1 = 仍有缺（或装不上）
 #
-# 【2026-11-21 用户定】adblock 整套不进固件：不装包、不进保护组、不预置名单与配置。
+# 【2026-11-21 用户定】adblock 只做**包级保护**、不做任何配置：三件包归 _PA_ADBLOCK，
+# 无专用脚本、无资产注入（名单 / feed / DNS 对接都不预置）。
+# localhost 本地解析规则照旧保留在 smartdns custom.conf（smartdns-restore 03-localrule）。
 #
 # 判据主体是包管理器认不认。本版写死 apk（25.12 线只有 apk）：apk info -e。
 # 【2026-11-02】原 daed-geoip / daed-geosite 的软链接例外随 daed 一并移除
@@ -205,8 +207,8 @@ _PA_COMMON="sing-box"
 # 结论：这三个组只走 _pa_installed（apk info -e），文件级一律放行。
 # 二进制真被删了，重装包自然连文件一起回来；配置文件不被任何自动动作碰。
 _PA_HONK="honk luci-app-honk"
-# 【2026-11-21 用户定】adblock 整套不进固件：不装包、不进保护组、不预置名单与配置。
-_PA_PKGONLY="$_PA_OC $_PA_CERT $_PA_DDNS $_PA_TOOLS $_PA_SSRP $_PA_DAED $_PA_HONK $_PA_WEB"
+_PA_ADBLOCK="adblock luci-app-adblock luci-i18n-adblock-zh-cn"
+_PA_PKGONLY="$_PA_OC $_PA_CERT $_PA_DDNS $_PA_TOOLS $_PA_SSRP $_PA_DAED $_PA_HONK $_PA_WEB $_PA_ADBLOCK"
 
 # 【2026-11-02】daed 在 25.12 线已被 honk 取代（用户定），原来的 geo 软链接判据一并删除：
 #   honk 的规则集不走 /usr/share/daed/*.dat 软链接，而是按 native_api.geosite_download_url /
@@ -217,7 +219,7 @@ _PA_PKGONLY="$_PA_OC $_PA_CERT $_PA_DDNS $_PA_TOOLS $_PA_SSRP $_PA_DAED $_PA_HON
 # 【2026-11-10】_PA_HONK 并入清单：_PA_PKGONLY 原本写了 honk 三包却不进 _PA_LIST，
 # 等于「判据写了、范围没进去」，只有 honk 变体才该有这三个包，靠 _pa_should 按
 # /rom/lib/apk/db/installed 的 P: 行过滤 —— 纯净 25.12 / daed 线上自动跳过，不误报。
-_PA_LIST="${CS_PROBE_APPS:-$_PA_OC $_PA_CERT $_PA_DDNS $_PA_TOOLS $_PA_SSRP $_PA_GEO $_PA_DAED $_PA_COMMON $_PA_HONK} $_PA_WEB"
+_PA_LIST="${CS_PROBE_APPS:-$_PA_OC $_PA_CERT $_PA_DDNS $_PA_TOOLS $_PA_SSRP $_PA_GEO $_PA_DAED $_PA_COMMON $_PA_HONK} $_PA_WEB $_PA_ADBLOCK"
 
 # 【2026-11-19 用户定】依赖组：库 + kmod 单独一组，**只在开机一次的 --repair 里补**，
 # 不进 _PA_LIST（--check / --list 继续只报应用，不把系统库当应用来报）。
