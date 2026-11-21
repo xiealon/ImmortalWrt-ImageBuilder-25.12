@@ -173,6 +173,4 @@ if [ -f "$PKG_RESTORE" ]; then
 else
     echo "[$(date '+%F %T')] 【依赖文件】未找到 $PKG_RESTORE，跳过" >>"$LOG"
 fi
-# 【2026-11-21 用户定】adblock 改为「只装包、不做任何配置」，
-# 原来这里调用 /usr/sbin/adblock/restore.sh 的整段已删除。
 exit 0
