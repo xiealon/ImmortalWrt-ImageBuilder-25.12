@@ -142,6 +142,6 @@ if [ -z "$_fixed" ]; then
 else
     log "本次修复：$_fixed"
     log "smartdns 已接管 DNS：6 条上游（国内 2 DoH + 2 DoT，境外 2 DoH），dnsmasq 由 init 让出 53"
-    log "localhost 本地解析在位：adblock 的 nslookup localhost. 探活可通过"
+    log "localhost 本地解析在位：nslookup localhost. 探活可通过"
 fi
 exit 0
