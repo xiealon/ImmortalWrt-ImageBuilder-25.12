@@ -549,7 +549,7 @@ for _f in files/etc/rc.local \
     [ -x "$_f" ] || { echo "::error::缺少执行位: $_f"; exit 1; }
 done
 _n_sh=$(find files/usr/sbin -type f -name '*.sh' 2>/dev/null | wc -l | tr -d ' ')
-echo "==> 已确保引导/自愈脚本可执行（files/usr/sbin 全树 $_n_sh 个 .sh，含 bootstrap/smartdns/adblock）"
+echo "==> 已确保引导/自愈脚本可执行（files/usr/sbin 全树 $_n_sh 个 .sh，含 bootstrap/smartdns）"
 
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Building image with the following packages:"
 echo "$PACKAGES"
