@@ -27,11 +27,7 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES shadowsocksr-libev-ssr-local shadowsocksr-libe
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES -dnsmasq dnsmasq-full"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES yq kmod-dummy ca-bundle"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-taskplan luci-i18n-taskplan-zh-cn"
-# 【2026-11-02】mosdns 移除（用户定：DNS 只留 smartdns + adblock 这条链）。
-# 为什么不留：DNS 层已经有两层在跑 —— smartdns 占 53 做加速/分流/缓存，
-# adblock 生成广告黑名单喂给 smartdns（/etc/config/adblock 里
-#   option adb_enabled '1' + option adb_dns 'smartdns'，
-# /etc/config/smartdns 里 list conf_files '/tmp/smartdns/adb_list.overall'）。
+# 【2026-11-02】mosdns 移除（用户定）：DNS 只留 smartdns 一层，占 53 做加速/分流/缓存。
 # 再加 mosdns 就是第三个 DNS 分流器，默认端口 5335 且 redirect '1' 会去抢
 # 53 的活，和 smartdns 直接冲突。当日实测 mosdns 本来就是 enabled '0' 没在跑。
 # 注意：_PA_MOSDNS 保护组保留不动 —— 新固件不再带 P:mosdns，_pa_should
