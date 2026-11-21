@@ -145,7 +145,7 @@ GUARD_FILES="${CS_GUARD_FILES:-
 #      没有执行位或文件不在，整段开机收尾被跳过 —— bootstrap 一次都不跑，
 #      Router IP 不生效、guard / smartdns / 应用包恢复全部不执行。
 #
-# 其余 38 个脚本（bootstrap 16 / smartdns-restore 10 / adblock 7 / 另 5 个单文件）
+# 其余脚本（bootstrap 16 / smartdns-restore 10 / 另若干单文件）
 # 都直接从 /rom 执行，squashfs 只读、改不了删不掉，不需要再比对。
 /usr/sbin/crowdsec-lxc-probe.sh
 /etc/init.d/crowdsec-lxc-probe
