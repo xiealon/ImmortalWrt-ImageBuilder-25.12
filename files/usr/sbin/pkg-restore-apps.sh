@@ -19,12 +19,7 @@
 #   pkg-restore-apps.sh [--repair]  装回缺的那些，再复判一次
 #                                   0 = 全部在位；1 = 仍有缺（或装不上）
 #
-# 【2026-11-10】adblock 整组移出本脚本，独立成 /usr/sbin/adblock/：
-#   它的恢复 / 配置 / 规则文件 / 删除重建四项都由那边按步骤管，
-#   本脚本只管代理内核（clashoo / daed / sing-box）与 geo 数据。
-#   移除理由：adblock 是本机唯一允许「删了重装」的包，而那条链要整链删除
-#   （单独 del 主包会被 luci-i18n 的反向依赖挡住），代码形态与本脚本的
-#   逐包恢复不同，混在一处两套白名单会互相干扰。
+# 【2026-11-21 用户定】adblock 整套不进固件：不装包、不进保护组、不预置名单与配置。
 #
 # 判据主体是包管理器认不认。本版写死 apk（25.12 线只有 apk）：apk info -e。
 # 【2026-11-02】原 daed-geoip / daed-geosite 的软链接例外随 daed 一并移除
@@ -116,9 +111,6 @@ _RESTORE="${RESTORE_BIN:-$SROOT/usr/sbin/pkg-restore.sh}"
 #   daed / luci-app-daede / vmlinux-btf
 #   sing-box
 #   v2ray-geoip / v2ray-geosite（2026-11-02 补入，只判包不判文件，见 _PA_GEO）
-#   （adblock / luci-app-adblock / luci-i18n-adblock-zh-cn 三包 2026-11-10 移出本脚本，
-#     归 /usr/sbin/adblock/ 独立管理；包库里它们的 apk 照旧收在 build25.sh 的 _AK_WANT，
-#     移除只是换了管它的脚本，不是取消保护）
 #
 # vmlinux-btf 为什么也进 daed 组（2026-11-10）：
 #   daed 的 Makefile 写着 +DAED_USE_VMLINUX_BTF:vmlinux-btf，包内 Depends
@@ -213,11 +205,7 @@ _PA_COMMON="sing-box"
 # 结论：这三个组只走 _pa_installed（apk info -e），文件级一律放行。
 # 二进制真被删了，重装包自然连文件一起回来；配置文件不被任何自动动作碰。
 _PA_HONK="honk luci-app-honk"
-# 【2026-11-21 用户定】adblock 只做**包级保护**、不做任何配置：
-# 固件装 adblock / luci-app-adblock / luci-i18n-adblock-zh-cn 三件，
-# 屏蔽表、feed、DNS 对接全留给用户在 LuCI 里开；原先的专用四态脚本
-# （/usr/sbin/adblock/restore.sh 那套会写 uci、重建名单）已整体删除。
-# 【2026-11-21 用户定】adblock 整套移除，故 _PA_ADBLOCK 组删除。
+# 【2026-11-21 用户定】adblock 整套不进固件：不装包、不进保护组、不预置名单与配置。
 _PA_PKGONLY="$_PA_OC $_PA_CERT $_PA_DDNS $_PA_TOOLS $_PA_SSRP $_PA_DAED $_PA_HONK $_PA_WEB"
 
 # 【2026-11-02】daed 在 25.12 线已被 honk 取代（用户定），原来的 geo 软链接判据一并删除：
@@ -250,10 +238,8 @@ _pa_kmods() {
 # 【2026-11-19 用户定】开机补充组：**只走开机那一次 --repair**，不进 _PA_LIST / --check / --list。
 # 为什么要单独一组：这批 luci-app 固件里确实装着，但既不在保护组、也不在 manifest.txt，
 # 被 apk del 掉后过去只能手动从本地库装回。名单来自 201 实测（出厂 39 个 luci-app − 保护组 − manifest）。
-# 不含 luci-app-adblock：它归 /usr/sbin/adblock/restore.sh 那套四态脚本（含 luci-app-adblock）。
 # luci-app-partexp / luci-app-taskplan：官方 index.json 没这两个键，但 build25.sh 的来源 C4
 # 已把它们的 apk 从 packages/ 拷进库（2026-11-19 用户定），所以这里可以列进来、真能装回。
-# 不含 luci-app-adblock：它归 /usr/sbin/adblock/restore.sh 那套专用脚本。
 _PA_BOOT_APPS="luci-app-3ginfo-lite luci-app-aria2 luci-app-cifs-mount luci-app-diskman luci-app-email luci-app-filemanager luci-app-firewall luci-app-hd-idle luci-app-ksmbd luci-app-nfs luci-app-openvpn luci-app-p910nd luci-app-package-manager luci-app-partexp luci-app-rtp2httpd luci-app-sqm luci-app-taskplan luci-app-timewol luci-app-ttyd luci-app-uhttpd luci-app-upnp luci-app-wechatpush"
 
 # 开机补充组里「该有却没有」的（只给 --repair 用）
