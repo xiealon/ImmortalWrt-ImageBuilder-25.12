@@ -19,7 +19,7 @@
 # 顺序（不能换）：
 #   01-pkg       包先到位，否则后面 uci 全是空转
 #   02-conf      规则文件先补齐 —— smartdns 起不来的头号原因是 conf-file 指向的文件没了
-#   03-localrule custom.conf 补 localhost 行（adblock 探活用）
+#   03-localrule custom.conf 补 localhost 行（DNS 探活用）
 #   04-config    主段
 #   05-upstream  上游 6 条
 #   06-apply     commit + 重启 + 等 53
