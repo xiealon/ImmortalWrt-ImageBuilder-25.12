@@ -1520,22 +1520,6 @@ if [ -n "$_IB_PKGS" ] && [ -d "$_IB_PKGS/official" ]; then
         fi
     done
     if [ "$_ak_km_n" -ge 1100 ]; then
-        # 【2026-11-23】已知会被上游同名包抢走的：上游 25.12.2 的 packages feed 里
-        # kmod-ip6-vti 也是 6.12.103-r1，但依赖 kernel=71cc20e3；apk 求解时挑了上游那份，
-        # 于是 kernel-26ed 被判 breaks，第一次 make image 必失败（run #166/#168/#173）。
-        # 与其白跑一轮再剔，这里直接不放进清单。
-        # 官方同名包会抢走求解的（版本号相同、内核 hash 不同）
-        # + 同 .ko 互斥变体（装了会互相覆盖同一 .ko，必冲突；只留主流那份）
-        _ak_km_skip="kmod-ip6-vti kmod-ath10k-ct kmod-ath10k-ct-smallbuffers kmod-ath10k-smallbuffers kmod-usb-net-rtl8152-vendor"
-        for _s in $_ak_km_skip; do
-            case " $_ak_km_all " in
-            *" $_s "*)
-                _ak_km_all=$(echo $_ak_km_all | tr ' ' '\n' | grep -vxF "$_s" | tr '\n' ' ')
-                _ak_km_n=$(echo $_ak_km_all | wc -w)
-                echo "==> [kmod-all] 预剔除 $_s（上游同名包会抢走求解，必冲突）"
-                ;;
-            esac
-        done
         PACKAGES="$PACKAGES $_ak_km_all"
         echo "==> [kmod-all] 已把 $_ak_km_n 个 kmod 追加进 PACKAGES（official/ 全量（自建内核配套）；核不上跳过 $_ak_km_bad 个）"
         echo "==> [kmod-all] 抽样：$(echo $_ak_km_all | tr ' ' '\n' | awk 'NR<=5{printf "%s ",$0}')"
@@ -1629,68 +1613,34 @@ done
 echo "==> [kmod-diag] 结束"
 
 # ---- 唯一一遍：此时 files/ 里的包库已完整，一次合进 rootfs ----
-# 【2026-11-23】一次装 1600+ 个包（含全量 kmod）。两类失败都自动处理：
-#  ① 官方 feed 里同名 kmod 是另一套内核 hash（71cc20e3），apk 偶尔挑中它 →
-#     unable to select / breaks: → 剔掉那个包（它的官方版本本来也装不进 26ed 内核）。
-#  ② 互斥变体互相覆盖同一 .ko →
-#     ERROR: kmod-ath10k-ct-...: trying to overwrite ... owned by kmod-ath10k-...
-#     → 剔掉「试图覆盖」的那个变体，留主流那份（ct / smallbuffers / vendor 都是变体）。
-# 只从问题行取名字，绝不碰候选清单；单轮上限 50，最多 6 轮。
-_ak_mk_round=0
-while :; do
-    make image PROFILE="generic" PACKAGES="$PACKAGES" FILES="/home/build/immortalwrt/files" ROOTFS_PARTSIZE=$PROFILE 2>&1 | tee /tmp/imm25-mk.log
-    _ak_mk_rc=${PIPESTATUS[0]}
-    [ "$_ak_mk_rc" = "0" ] && break
-    _ak_mk_round=$((_ak_mk_round + 1))
-    echo "==> [kmod-all] make image 第 $_ak_mk_round 次失败（rc=$_ak_mk_rc）"
-    if [ "$_ak_mk_round" -gt 6 ]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Build failed (2nd pass: apk-cache, 6 轮仍失败)!"
-        tail -n 40 /tmp/imm25-mk.log
-        exit 1
+# 【2026-11-23 用户定】官方 kmod 一律不要：直接把官方 packages feed 从 repositories 里
+# 摘掉，让它们根本不参与求解。
+#   为什么：上游 25.12.2 的 kmod 是内核 71cc20e3 编的，与自建内核 26ed6bc1 同名同版本
+#   （都是 6.12.103-r1），apk 会挑中上游那份 →
+#     ERROR: unable to select packages: kernel-26ed ... breaks: kmod-x[kernel=71cc]
+#   这类包装进我们内核也跑不起来（vermagic 不符）。
+# 不按名单剔包：整条 feed 去掉；万一这条 feed 还担着某个普通包，下面会把它点名出来。
+_ak_repo_bak=/tmp/repositories.orig
+if [ -f repositories ]; then
+    cp -f repositories "$_ak_repo_bak"
+    awk '!/\/packages\/x86_64\/packages\/packages\.adb$/' "$_ak_repo_bak" > /tmp/repositories.new
+    if [ -s /tmp/repositories.new ]; then
+        cat /tmp/repositories.new > repositories
+        echo "==> [kmod-all] repositories 已去掉官方 packages feed（71cc kmod 来源），剩 $(grep -c . repositories) 条："
+        sed 's|^|      |' repositories
+    else
+        echo "::warning::[kmod-all] 去掉官方 packages feed 后一条不剩，保持原样"
     fi
-    if ! grep -qE 'unable to select|not found|no such package|required by|not a valid world dependency|Unknown package|conflict|trying to overwrite' /tmp/imm25-mk.log; then
-        echo "==> [kmod-all] 日志里没有「包名/依赖/覆盖」类错误，是别的问题，不再重试"
-        tail -n 40 /tmp/imm25-mk.log
-        exit 1
-    fi
-    awk '/^ERROR:/{f=1} f{if (/^make\[2\]: \*\*\*/) exit; print}' /tmp/imm25-mk.log \
-        | grep -E 'breaks:|required by|not found|no such package|Unknown package|not a valid world dependency|conflict|trying to overwrite' \
-        > /tmp/imm25-mk.err
-    {
-        # ① ERROR: <包>-<版本>: ...（覆盖冲突 / world 依赖非法）—— 只取冒号前那个包
-        sed -nE 's/^ERROR: *([^:]+):.*/\1/p' /tmp/imm25-mk.err \
-            | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//'
-        # ② <包> (no such package):
-        sed -nE 's/^ *([A-Za-z0-9_.+-]+) \(no such package\).*/\1/p' /tmp/imm25-mk.err
-        # ③ breaks: / required by 行里带版本的包名
-        grep -E 'breaks:|required by|not a valid world dependency' /tmp/imm25-mk.err \
-            | grep -oE '[A-Za-z0-9_.+-]+-[0-9]+\.[0-9]+\.[0-9]+' \
-            | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//'
-        # ④ 引号点名的包
-        grep -oE "'[A-Za-z0-9_.~+-]+'" /tmp/imm25-mk.err | tr -d "'"
-    } 2>/dev/null | grep -E '^[a-z]' | sort -u > /tmp/imm25-mk.drop
-    _ak_mk_drop=""
-    while IFS= read -r _b; do
-        [ -n "$_b" ] || continue
-        case " $PACKAGES " in *" $_b "*) _ak_mk_drop="$_ak_mk_drop $_b" ;; esac
-    done < /tmp/imm25-mk.drop
-    _ak_drop_n=$(echo $_ak_mk_drop | wc -w)
-    if [ "$_ak_drop_n" = 0 ]; then
-        echo "==> [kmod-all] 问题行里的包名都不在 PACKAGES 里，是别的问题，不再重试"
-        head -n 20 /tmp/imm25-mk.err
-        tail -n 20 /tmp/imm25-mk.log
-        exit 1
-    fi
-    if [ "$_ak_drop_n" -gt 50 ]; then
-        echo "::error::[kmod-all] 一轮要剔 $_ak_drop_n 个包（>50），不像个别冲突，中止以免把 kmod 全剔光"
-        head -n 20 /tmp/imm25-mk.err
-        exit 1
-    fi
-    for _b in $_ak_mk_drop; do
-        PACKAGES=$(echo $PACKAGES | tr ' ' '\n' | grep -vxF "$_b" | tr '\n' ' ')
-        echo "==> [kmod-all] 从 PACKAGES 剔除 $_b"
-    done
-done
+fi
+
+make image PROFILE="generic" PACKAGES="$PACKAGES" FILES="/home/build/immortalwrt/files" ROOTFS_PARTSIZE=$PROFILE 2>&1 | tee /tmp/imm25-mk.log
+_ak_mk_rc=${PIPESTATUS[0]}
+if [ "$_ak_mk_rc" != "0" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Build failed (2nd pass: apk-cache)!"
+    echo "==> [kmod-all] 失败原因（ERROR: 到 make[2]: *** 之间）："
+    awk '/^ERROR:/{f=1} f{if (/^make\[2\]: \*\*\*/) exit; print}' /tmp/imm25-mk.log | head -n 40
+    exit 1
+fi
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Build completed successfully."
 
 echo "==> 离线恢复示例（固件刷好后，包被别人卸载时）："
