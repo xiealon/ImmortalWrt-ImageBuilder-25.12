@@ -404,133 +404,39 @@ jobs:
       #   CONFIG_DYNAMIC_FTRACE=y / _WITH_REGS=y / _WITH_DIRECT_CALLS=y
       #   CONFIG_FUNCTION_TRACER=y / CONFIG_DEBUG_INFO_BTF=y
       # 哈希钉死：包被换掉时这一步直接红，不会悄悄产出一份没有 ftrace 的固件。
-      - name: Prepare local ImageBuilder (honk kernel)
+      # 【2026-11-23 用户定】改用官方 ImageBuilder —— 自建 honk 内核那套先不用了。
+      # 原因：自建内核 hash 26ed6bc1 与官方 kmod（71cc20e3）同名同版本却对不上，
+      # 装 kmod 时反复 unable to select / trying to overwrite。
+      # 改走官方 IB：内核、工具链、apk 源全部官方，kmod 与内核天生配套。
+      - name: Prepare local ImageBuilder (official)
         run: |
-          set -e
-          IB_URL="https://github.com/xiealon/immortalwrt-artifacts/releases/download/v25.12.2-ib-x86-64-r2/immortalwrt-imagebuilder-25.12.2-x86-64.Linux-x86_64.tar.zst"
-          IB_SHA="73abe42d053fbc5a261235c08142704cdc253ff9e05ea7b9e0e2cb5e75b312e8"
+          set -euo pipefail
           IB="${{ github.workspace }}/ib"
+          URL="https://downloads.immortalwrt.org/releases/25.12.2/targets/x86/64/immortalwrt-imagebuilder-25.12.2-x86-64.Linux-x86_64.tar.zst"
 
-          echo "==> 下载 ImageBuilder（honk 内核）"
-          curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 600 \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -o /tmp/ib.tar.zst "$IB_URL"
-          echo "==> 校验 sha256"
-          echo "$IB_SHA  /tmp/ib.tar.zst" | sha256sum -c -
-
-          command -v zstd >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y zstd; }
+          rm -rf "$IB"
           mkdir -p "$IB"
-          echo "==> 解压"
+          echo "==> 下载官方 ImageBuilder：$URL"
+          curl -fL --retry 3 --retry-delay 5 -o /tmp/ib.tar.zst "$URL"
+          ls -l /tmp/ib.tar.zst
           tar -I zstd -xf /tmp/ib.tar.zst -C "$IB" --strip-components=1 --no-same-owner
           rm -f /tmp/ib.tar.zst
+          echo "==> 官方内核：$(ls "$IB/packages"/kernel-6.12.*-r1.apk 2>/dev/null | head -n1 | xargs -r basename)"
 
-          # ---------------------------------------------------------------
-          # 【honk 线 · 2026-11-03】把自建内核配套的 apk 全集灌进 IB。
-          #
-          # 为什么必须灌：ImageBuilder 不编 kmod，1,204 个内核模块全靠外部源。
-          # 而 downloads.immortalwrt.org 的 kmods 目录下只有官方那一个 hash：
-          #   releases/25.12.2/targets/x86/64/kmods/6.12.103-1-0413601b1c3f0490e17f340fe09229ea/
-          # 我们这个 IB 的内核是自建 honk 内核，hash 是 26ed6bc1 —— 实测那条
-          # packages.adb 返回 404，于是所有 kmod-*、kernel、base-files 全部
-          # 「(no such package)」，make image 直接 Error 99。
-          #
-          # 这份 pkg 包里就是同一次编译产出的全部 1,688 个 apk（1,204 kmod +
-          # 484 其他 + kernel 本尊），内核 hash 与 IB 完全一致，天生配套。
-          # 落在 packages/official/ 子目录（不平铺），因为 build25.sh 的「来源 A」
-          # 会把 packages/*.apk 无差别拷进 /root/apk-cache —— 那是要打进固件的，
-          # 1,688 个包会凭空多出几百 MB。放子目录既不触发那条通配，又能被
-          # build25.sh 生成的索引收录。
-          # ---------------------------------------------------------------
-          PKG_URL="https://github.com/xiealon/immortalwrt-artifacts/releases/download/v25.12.2-pkg-x86-64-r2/packages-x86_64-25.12.2.tar.zst"
-          PKG_SHA="7af7a3a914ae3876e32890150c7bf001a80d160a0ee6769796fc25669478c1a4"
-
-          echo "==> 下载 apk 全集（自建内核配套包）"
-          curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 900 \
-            -o /tmp/pkg.tar.zst "$PKG_URL"
-          echo "==> 校验 sha256"
-          echo "$PKG_SHA  /tmp/pkg.tar.zst" | sha256sum -c -
-
-          # 只解根层 packages/*.apk（扁平那 1,688 个）；packages/x86_64/ 那 397 条
-          # 是 feed 归档，带子目录，ImageBuilder 的 packages/ 是平层，用不上。
-          rm -rf /tmp/pkgx && mkdir -p /tmp/pkgx
-          tar -I zstd -xf /tmp/pkg.tar.zst -C /tmp/pkgx --wildcards 'packages/*.apk' --no-same-owner
-          rm -f /tmp/pkg.tar.zst
-
-          mkdir -p "$IB/packages/official"
-          cp -f /tmp/pkgx/packages/*.apk "$IB/packages/official/"
-          rm -rf /tmp/pkgx
-
-          PKG_N=$(ls "$IB/packages/official"/*.apk 2>/dev/null | wc -l)
-          PKG_K=$(ls "$IB/packages/official"/kmod-*.apk 2>/dev/null | wc -l)
-          echo "==> 已灌入 $PKG_N 个 apk（其中 kmod $PKG_K 个）→ \$IB/packages/official/"
-
-          # 内核包必须与 IB 自带的那份【同一个 hash】。防的是：Release 里的 pkg 包
-          # 被换成另一次编译的产物 —— 那样 kmod 的 kernel(=...) 依赖会对不上，
-          # 构建照样能跑完，但装包阶段才炸，而且报错点离根因很远。
-          IB_KRATIO=$(ls "$IB/packages"/kernel-6.12.*-r1.apk 2>/dev/null | head -n1)
-          PK_KRATIO=$(ls "$IB/packages/official"/kernel-6.12.*-r1.apk 2>/dev/null | head -n1)
-          if [ -z "$IB_KRATIO" ] || [ -z "$PK_KRATIO" ]; then
-            echo "::error::找不到 kernel 包（IB=$IB_KRATIO / pkg=$PK_KRATIO）"
-            exit 1
-          fi
-          if [ "$(basename "$IB_KRATIO")" != "$(basename "$PK_KRATIO")" ]; then
-            echo "::error::内核 hash 不一致，kmod 依赖必然对不上"
-            echo "::error::IB 里：$(basename "$IB_KRATIO")"
-            echo "::error::pkg 里：$(basename "$PK_KRATIO")"
-            exit 1
-          fi
-          echo "==> 内核 hash 一致：$(basename "$IB_KRATIO")"
-
-          if [ "$PKG_K" -lt 1100 ]; then
-            echo "::error::kmod 只有 $PKG_K 个（预期 1204），内核模块库不完整"
-            exit 1
-          fi
-
-          # repositories 里那条 kmods 源指向官方 hash（0413601b），与我们这个内核
-          # 无关，每次构建都会重试 4 秒再吞一条 warning。本地已有全量 kmod，
-          # 直接删掉这行，省掉 100+ 条噪音。
-          #
-          # video 那条同理，但原因是上游根本没发这个 feed：实测
-          #   packages/x86_64/base|luci|packages|routing|telephony/packages.adb  全 200
-          #   packages/x86_64/video/packages.adb                                 404
-          # 25.12 的 video feed 没构建出来。apk 每装一个包都会重试它一次，
-          # 578 个包就是几百行 "No such file or directory"，把真正的错挤没了。
-          # 我们装的包里没有 video feed 的东西，删掉不影响任何依赖。
+          # 官方 repositories 里带着 kmods / video 两个 404 源，删掉免得每次 apk 都报 EOF
           if [ -f "$IB/repositories" ]; then
             sed -i -e '\#/kmods/#d' -e '\#/packages/x86_64/video/#d' "$IB/repositories"
-            echo "==> 已移除 repositories 里的 kmods 源与 video 源（上游 404）"
-            echo "==> 剩余源 $(grep -c . "$IB/repositories") 条："
-            sed 's|^|      |' "$IB/repositories"
+            echo "==> repositories 剩 $(grep -c . "$IB/repositories") 条"
           fi
 
-          # 内核配置复核：包里的 .config 必须真的带 ftrace 五项。
-          # 防的不是下载出错，是「Release 资产被人换成官方 IB」之后整条线静默降级成
-          # 一份能开机、但 honk 起不来的固件。
-          KCFG=$(find "$IB/build_dir" -path '*linux-x86_64/linux-*/.config' 2>/dev/null | head -n1)
-          if [ -n "$KCFG" ]; then
-            for k in CONFIG_DYNAMIC_FTRACE CONFIG_DYNAMIC_FTRACE_WITH_REGS \
-                     CONFIG_DYNAMIC_FTRACE_WITH_DIRECT_CALLS CONFIG_FUNCTION_TRACER \
-                     CONFIG_DEBUG_INFO_BTF; do
-              grep -qx "$k=y" "$KCFG" || { echo "::error::IB 内核缺 $k（$KCFG）—— honk 会起不来"; exit 1; }
-            done
-            echo "==> 内核配置复核通过：ftrace/BTF 五项全开"
-          else
-            echo "::warning::没找到 IB 的内核 .config，跳过复核"
-          fi
-
-          # build25.sh 里写死了 /home/build/immortalwrt（12 处以上：packages/、
-          # repositories.conf、files/etc/config、make image 的 FILES=）。不再进容器，
-          # 就用软链把这个路径指到解压目录，脚本一个字都不用改。
+          # build25.sh 里写死了 /home/build/immortalwrt，用软链接把路径指过来
           sudo mkdir -p /home/build
           sudo ln -sfn "$IB" /home/build/immortalwrt
 
-          # 产物目录：原来靠 -v 挂到容器的 bin/，现在让 workspace/bin 指向 IB/bin，
-          # 后面「产物文件名加档位后缀」「上传 Release」照旧读 $GITHUB_WORKSPACE/bin。
           mkdir -p "$IB/bin"
           rm -rf "${{ github.workspace }}/bin"
           ln -sfn "$IB/bin" "${{ github.workspace }}/bin"
 
-          # 仓库侧的输入挂进去（等价于原来的 7 个 -v）。
           cp -f "${{ github.workspace }}/x86-64/imm25.config" "$IB/.config"
           cp -f "${{ github.workspace }}/x86-64/build25.sh" "$IB/build.sh"
           chmod +x "$IB/build.sh"
@@ -539,8 +445,7 @@ jobs:
             rm -rf "$IB/$d"
             ln -sfn "${{ github.workspace }}/$d" "$IB/$d"
           done
-
-          echo "==> IB 就绪：$(du -sh "$IB" | cut -f1)"
+          echo "==> IB 就绪（官方）：$(du -sh "$IB" | cut -f1)"
 
       - name: Build ImmortalWrt x86-64 EFI 25.12.x
         env:
