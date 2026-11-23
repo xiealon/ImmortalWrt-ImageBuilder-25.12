@@ -1619,6 +1619,24 @@ head -n 1 repositories 2>/dev/null | while IFS= read -r _ru; do
 done
 echo "==> [kmod-diag] 结束"
 
+# ---- 【2026-11-23 用户定】geo 数据用「点分日期」里最新的那份 ----
+# 坑：官方源用 yymmddHHMMSS 形式（20260529193437），数值上比 run 包的 2026.10.25 大，
+# apk 会判定"官方更新"，其实装的是 5 月的旧数据。这里把 run 包里的最新点分日期版本
+# 钉进 PACKAGES，逼 apk 用新的那份。
+for _ak_ng in v2ray-geoip v2ray-geosite; do
+    _ak_ngv=$(ls "$_AK_DIR"/"$_ak_ng"-[0-9]*.apk 2>/dev/null \
+        | sed 's#.*/##; s/\.apk$//' \
+        | sed "s/^$_ak_ng-//" \
+        | grep -E '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}' \
+        | sort -V | tail -n1)
+    if [ -n "$_ak_ngv" ]; then
+        PACKAGES="$PACKAGES $_ak_ng=$_ak_ngv"
+        echo "==> [geo] 钉住 $_ak_ng=$_ak_ngv（点分日期里最新）"
+    else
+        echo "==> [geo] 本地没有 $_ak_ng 的点分日期版本，沿用官方源"
+    fi
+done
+
 # ---- 唯一一遍：此时 files/ 里的包库已完整，一次合进 rootfs ----
 # 【2026-11-23】官方源里没有一批 profile 默认 kmod（实测：kmod-acpi-call /
 # kmod-gpio-pwm / kmod-hwmon-pwmfan），硬装就 `no such package ... world[...]` →
