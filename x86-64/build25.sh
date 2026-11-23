@@ -1595,10 +1595,12 @@ fi
 ls "$_AK_DIR" | head -n 20
 
 # ---- 唯一一遍：此时 files/ 里的包库已完整，一次合进 rootfs ----
-# 【2026-11-23】一次装 1300+ 个包（含全量 kmod）。个别包若与内核 hash 对不上，
-# apk 会以 `unable to select packages` 报错退出。这里带「剔掉报错包再试」：
-# 从 `ERROR:` 到 `make[2]: ***` 这一段里捞包名（这段才是候选清单，头行没有名字），
-# 去掉后重试，最多 5 轮；捞不到新包名（真错误）立刻中止。
+# 【2026-11-23】一次装 1300+ 个包（含全量 kmod）。上游 feed 里同名 kmod 是另一套
+# 内核 hash（71cc20e3），与自建内核（26ed6bc1）的版本号完全相同，apk 挑中上游那份就会
+#   ERROR: unable to select packages:
+#     kernel-6.12.103~26ed...: breaks: kmod-x[kernel=6.12.103~71cc...]
+# 所以带「剔掉报错包再试」。但注意：这段输出里还有 1200 行「已满足的候选」，
+# 绝不能一起剔 —— 只认下面几种「问题行」，单轮上限 50 个，剔完重试，最多 5 轮。
 _ak_mk_round=0
 while :; do
     make image PROFILE="generic" PACKAGES="$PACKAGES" FILES="/home/build/immortalwrt/files" ROOTFS_PARTSIZE=$PROFILE 2>&1 | tee /tmp/imm25-mk.log
@@ -1616,19 +1618,26 @@ while :; do
         tail -n 40 /tmp/imm25-mk.log
         exit 1
     fi
-    # 只取报错段：从第一个 ERROR: 到 make[2]: ***，避免把 Packages 清单里的名字全剔掉
-    awk '/^ERROR:/{f=1} f{print; if (/^make\[2\]: \*\*\*/) exit}' /tmp/imm25-mk.log > /tmp/imm25-mk.err
-    _ak_mk_bad=$( { grep -oE "'[A-Za-z0-9_.~+-]+'" /tmp/imm25-mk.err
-                    grep -oE '[A-Za-z0-9_.+-]+-[0-9]+\.[0-9]+\.[0-9]+' /tmp/imm25-mk.err ; } \
+    # 只留「问题行」：breaks / required by / not found / Unknown package / world 依赖
+    awk '/^ERROR:/{f=1} f{if (/^make\[2\]: \*\*\*/) exit; print}' /tmp/imm25-mk.log \
+        | grep -E 'breaks:|required by|not found|Unknown package|not a valid world dependency|conflict' \
+        > /tmp/imm25-mk.err
+    _ak_mk_bad=$( grep -oE '[A-Za-z0-9_.+-]+-[0-9]+\.[0-9]+\.[0-9]+' /tmp/imm25-mk.err \
         | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//' | grep -E '^[a-z]' | sort -u)
     _ak_mk_drop=""
     for _b in $_ak_mk_bad; do
         case " $PACKAGES " in *" $_b "*) _ak_mk_drop="$_ak_mk_drop $_b" ;; esac
     done
-    if [ -z "$_ak_mk_drop" ]; then
-        echo "==> [kmod-all] 报错段里的包名都不在 PACKAGES 里，是别的问题，不再重试"
+    _ak_drop_n=$(echo $_ak_mk_drop | wc -w)
+    if [ "$_ak_drop_n" = 0 ]; then
+        echo "==> [kmod-all] 问题行里的包名都不在 PACKAGES 里，是别的问题，不再重试"
         head -n 20 /tmp/imm25-mk.err
         tail -n 20 /tmp/imm25-mk.log
+        exit 1
+    fi
+    if [ "$_ak_drop_n" -gt 50 ]; then
+        echo "::error::[kmod-all] 一轮要剔 $_ak_drop_n 个包（>50），不像单个冲突，中止以免把 kmod 全剔光"
+        head -n 20 /tmp/imm25-mk.err
         exit 1
     fi
     for _b in $_ak_mk_drop; do
