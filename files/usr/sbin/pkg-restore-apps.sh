@@ -235,7 +235,7 @@ _PA_DEPS="jansson4 libblkid1 libblobmsg-json20260213 libbpf1 libelf1 libgmp10 li
 # 现在会取到 1199 条 —— 保护面自动扩到全量，无需另维护名单。
 # 2026-11-19 时是 212 个（当时只保护出厂装过的那批）。
 # 【2026-11-23】kmod 全量预装后是 1,200+ 个，逐个 grep / 逐个 apk info 会让开机那次
-# --repair 白等好几秒。这里改成一次性 comm 求差，固定几条命令，与数量无关：
+# --repair 白等好几秒。这里改成一次性集合运算（grep -x -F -f），与数量无关：
 #   期望 = 出厂库里的 kmod  ∩  本地包里真有 apk 的（装不回来的名字不进来）
 #   实有 = 运行侧已装快照里的 kmod
 #   缺的 = 期望 - 实有
@@ -251,12 +251,15 @@ _pa_missing_kmods() {
         | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//' \
         | grep -E '^kmod-' | sort -u > "$_pa_mk_cache"
     if [ -s "$_pa_mk_cache" ]; then
-        comm -12 "$_pa_mk_exp" "$_pa_mk_cache" > "$_pa_mk_exp.ok"
+        # busybox 没有 comm（2026-11-23 设备实测：-ash: comm: not found），
+        # 用 grep -x -F -f 做集合运算：交集 = 拿 l 当模式表过滤 e
+        grep -x -F -f "$_pa_mk_cache" "$_pa_mk_exp" > "$_pa_mk_exp.ok" 2>/dev/null
     else
         cp "$_pa_mk_exp" "$_pa_mk_exp.ok"
     fi
     grep -E '^kmod-[A-Za-z0-9_.-]+$' "$_pa_snap_inst" | sort -u > "$_pa_mk_have"
-    comm -23 "$_pa_mk_exp.ok" "$_pa_mk_have"
+    # 差集 = 把已装清单当模式表，反向过滤期望清单
+    grep -x -v -F -f "$_pa_mk_have" "$_pa_mk_exp.ok" 2>/dev/null
     rm -f "$_pa_mk_exp" "$_pa_mk_cache" "$_pa_mk_exp.ok" "$_pa_mk_have"
 }
 
