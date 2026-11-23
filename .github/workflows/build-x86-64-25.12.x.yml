@@ -423,10 +423,14 @@ jobs:
           rm -f /tmp/ib.tar.zst
           echo "==> 官方内核：$(ls "$IB/packages"/kernel-6.12.*-r1.apk 2>/dev/null | head -n1 | xargs -r basename)"
 
-          # 官方 repositories 里带着 kmods / video 两个 404 源，删掉免得每次 apk 都报 EOF
+          # 【2026-11-23 修】只删 video 源（上游 404）。
+          # /kmods/ 那条必须留着：官方内核的 kmod 全在它下面
+          #   releases/25.12.2/targets/x86/64/kmods/6.12.103-1-<官方 hash>/
+          # 删掉它的后果是镜像里一个 kmod 都没有（run #181/#182 就是这么炸的）。
           if [ -f "$IB/repositories" ]; then
-            sed -i -e '\#/kmods/#d' -e '\#/packages/x86_64/video/#d' "$IB/repositories"
-            echo "==> repositories 剩 $(grep -c . "$IB/repositories") 条"
+            sed -i -e '\#/packages/x86_64/video/#d' "$IB/repositories"
+            echo "==> repositories 保留 $(grep -c . "$IB/repositories") 条（含 kmods 源）："
+            sed 's|^|      |' "$IB/repositories"
           fi
 
           # build25.sh 里写死了 /home/build/immortalwrt，用软链接把路径指过来
