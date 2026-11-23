@@ -235,11 +235,19 @@ _PA_DEPS="jansson4 libblkid1 libblobmsg-json20260213 libbpf1 libelf1 libgmp10 li
 # 现在会取到 1199 条 —— 保护面自动扩到全量，无需另维护名单。
 # 2026-11-19 时是 212 个（当时只保护出厂装过的那批）。
 _pa_kmods() {
-    if _pa_snap_fact_build; then
-        grep -E '^kmod-[A-Za-z0-9_.-]+$' "$_pa_snap_fact"
-        return
-    fi
-    grep -oE '^P:kmod-[A-Za-z0-9_.-]+' "$ROMDIR/lib/apk/db/installed" 2>/dev/null | sed 's/^P://'
+    # 【2026-11-23 用户定】kmod 不再全量预装，改为「本地库挂上、按需装」。
+    # 这里给开机 --repair 用的清单 = 出厂库里的 kmod ∪ 运行侧已装的 kmod，
+    # 再过滤成「本地库真有 apk」的名字 —— 装不回来的名字不进来，免得每轮空转。
+    {
+        _pa_snap_fact_build && grep -E '^kmod-[A-Za-z0-9_.-]+$' "$_pa_snap_fact"
+        _pa_snap_inst_build && grep -E '^kmod-[A-Za-z0-9_.-]+$' "$_pa_snap_inst"
+        grep -oE '^P:kmod-[A-Za-z0-9_.-]+' "$ROMDIR/lib/apk/db/installed" 2>/dev/null | sed 's/^P://'
+    } | sort -u | while IFS= read -r _pk; do
+        [ -n "$_pk" ] || continue
+        for _pf in /rom/root/apk-cache/"$_pk"-*.apk; do
+            [ -e "$_pf" ] && { printf '%s\n' "$_pk"; break; }
+        done
+    done
 }
 
 # 【2026-11-19 用户定】开机补充组：**只走开机那一次 --repair**，不进 _PA_LIST / --check / --list。
@@ -273,7 +281,12 @@ _pa_missing_boot() {
 _pa_missing_deps() {
     _pa_md=""
     for _pa_p in $_PA_DEPS $(_pa_kmods); do
-        _pa_should "$_pa_p" || continue
+        # kmod 不过 _pa_should：用户后来自己装的 kmod 不在出厂库里，
+        # 过那道闸门会被永久跳过。_pa_kmods 已经保证只在「库里有 apk」的范围内。
+        case "$_pa_p" in
+        kmod-*) : ;;
+        *) _pa_should "$_pa_p" || continue ;;
+        esac
         _pa_installed "$_pa_p" && continue
         _pa_md="$_pa_md $_pa_p"
     done
