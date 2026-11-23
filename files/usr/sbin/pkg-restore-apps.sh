@@ -230,8 +230,15 @@ _PA_LIST="${CS_PROBE_APPS:-$_PA_OC $_PA_CERT $_PA_DDNS $_PA_TOOLS $_PA_SSRP $_PA
 # 出厂没装过的会被 _pa_should 过滤掉（查 /rom/lib/apk/db/installed 的 P: 行），不会强加。
 _PA_DEPS="jansson4 libblkid1 libblobmsg-json20260213 libbpf1 libelf1 libgmp10 libjson-c5 libjson-script20260213 libltdl7 libmbedtls21 libmnl0 libmount1 libncurses6 libnetfilter-conntrack3 libnettle8 libnfnetlink0 libnftnl11 libnl-cli200 libnl-core200 libnl-genl200 libnl-nf200 libnl-route200 libnl-tiny1 libnl200 libopenssl3 libpcap1 libreadline8 libubox20260213 libubus20251202 libuci20250120 libucode20230711 libuuid1 libxml2-16 liblucihttp0 libcurl4 liblua5.4-5.4 liblzo2 libnghttp2-14 libruby3.4 libsqlite3-0 libuv1 libatomic1 libgcc1 libstdcpp6 libxtables12 kmod-usb-printer kmod-lp"
 
-# kmod 不写死：随内核版本变，直接从出厂库现取（201 实测 212 个，库内 212/212 都有 apk）
+# kmod 不写死：随内核版本变，直接从出厂库现取。
+# 【2026-11-23 用户定】全量 kmod 已由 build25.sh 预装进固件（1199 个），所以这里
+# 现在会取到 1199 条 —— 保护面自动扩到全量，无需另维护名单。
+# 2026-11-19 时是 212 个（当时只保护出厂装过的那批）。
 _pa_kmods() {
+    if _pa_snap_fact_build; then
+        grep -E '^kmod-[A-Za-z0-9_.-]+$' "$_pa_snap_fact"
+        return
+    fi
     grep -oE '^P:kmod-[A-Za-z0-9_.-]+' "$ROMDIR/lib/apk/db/installed" 2>/dev/null | sed 's/^P://'
 }
 
@@ -280,7 +287,41 @@ log() { printf '[APP] %s\n' "$*"; }
 
 # 24.10 线才需要 _PA_CACHE（opkg list-installed 是全表扫描，缓存后只跑一次）；
 # 25.12 的 apk info -e 直接问包数据库，不需要缓存，本文件不保留这个变量。
+# 【2026-11-23 用户定】全量 kmod 进了固件后，_pa_kmods 一次能取到 1199 个包。
+# 逐包 apk info -e / 逐包 grep 出厂库，光 fork 就够开机等 30 秒以上。
+# 所以这里各建一份快照，批量比对；快照拿不到（apk 参数不认识、解析失败）就退回
+# 老的逐包判定 —— 行为一致，只是慢一点，不会判错。
+_pa_snap_inst="/tmp/.pa-installed"
+_pa_snap_fact="/tmp/.pa-factory"
+
+# 已装包名快照：apk list --installed 优先，其次 apk info；行形如 busybox-1.36.1-r2
+_pa_snap_inst_build() {
+    [ -s "$_pa_snap_inst" ] && return 0
+    apk list --installed 2>/dev/null | awk '{print $1}' > "$_pa_snap_inst.raw"
+    [ -s "$_pa_snap_inst.raw" ] || apk info 2>/dev/null > "$_pa_snap_inst.raw"
+    sed -E 's/-[0-9][^-]*-r[0-9]+$//' "$_pa_snap_inst.raw" 2>/dev/null \
+        | grep -E '^[A-Za-z0-9]' | sort -u > "$_pa_snap_inst"
+    rm -f "$_pa_snap_inst.raw"
+    # 自检：busybox / apk 必然在，认不出就是格式变了，整份作废
+    if grep -qxE 'busybox|apk' "$_pa_snap_inst"; then
+        return 0
+    fi
+    rm -f "$_pa_snap_inst"
+    return 1
+}
+
+# 出厂已装库快照（/rom 侧 P: 行），与 _pa_should 同源
+_pa_snap_fact_build() {
+    [ -s "$_pa_snap_fact" ] && return 0
+    sed -n 's/^P://p' "$ROMDIR/lib/apk/db/installed" 2>/dev/null | sort -u > "$_pa_snap_fact"
+    [ -s "$_pa_snap_fact" ]
+}
+
 _pa_installed() {
+    if _pa_snap_inst_build; then
+        grep -qxF "$1" "$_pa_snap_inst"
+        return
+    fi
     apk info -e "$1" >/dev/null 2>&1
 }
 
@@ -328,7 +369,11 @@ _pa_should() {
     # 都会被判成「该有」。2026-10-29 真机复现：ssrp 组 5 个包被判缺失，第 3 轮
     # --repair 把 xray-core / xray-plugin 装了上去（运行时 624 vs 出厂 622）——
     # 这不是修复，是把用户没选的应用强加给机器。
-    grep -qxF "P:$1" "$ROMDIR/lib/apk/db/installed" 2>/dev/null && return 0
+    if _pa_snap_fact_build; then
+        grep -qxF "$1" "$_pa_snap_fact" && return 0
+    else
+        grep -qxF "P:$1" "$ROMDIR/lib/apk/db/installed" 2>/dev/null && return 0
+    fi
     # 【2026-11-19】别名表：白名单里写的是「能力名」，固件装的可能是另一个包名。
     # 实测：固件出厂的 /usr/bin/ip 来自 ip-full-6.18.0-r2，库里没有 P:ip 这一行，
     # 于是 --list 一直把 ip 显示成「固件未带」而被永久跳过（功能没坏，只是判据落空）。
