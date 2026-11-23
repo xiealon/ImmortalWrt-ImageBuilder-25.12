@@ -1520,6 +1520,20 @@ if [ -n "$_IB_PKGS" ] && [ -d "$_IB_PKGS/official" ]; then
         fi
     done
     if [ "$_ak_km_n" -ge 1100 ]; then
+        # 【2026-11-23】已知会被上游同名包抢走的：上游 25.12.2 的 packages feed 里
+        # kmod-ip6-vti 也是 6.12.103-r1，但依赖 kernel=71cc20e3；apk 求解时挑了上游那份，
+        # 于是 kernel-26ed 被判 breaks，第一次 make image 必失败（run #166/#168/#173）。
+        # 与其白跑一轮再剔，这里直接不放进清单。
+        _ak_km_skip="kmod-ip6-vti"
+        for _s in $_ak_km_skip; do
+            case " $_ak_km_all " in
+            *" $_s "*)
+                _ak_km_all=$(echo $_ak_km_all | tr ' ' '\n' | grep -vxF "$_s" | tr '\n' ' ')
+                _ak_km_n=$(echo $_ak_km_all | wc -w)
+                echo "==> [kmod-all] 预剔除 $_s（上游同名包会抢走求解，必冲突）"
+                ;;
+            esac
+        done
         PACKAGES="$PACKAGES $_ak_km_all"
         echo "==> [kmod-all] 已把 $_ak_km_n 个 kmod 追加进 PACKAGES（official/ 全量（自建内核配套）；核不上跳过 $_ak_km_bad 个）"
         echo "==> [kmod-all] 抽样：$(echo $_ak_km_all | tr ' ' '\n' | awk 'NR<=5{printf "%s ",$0}')"
