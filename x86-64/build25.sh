@@ -1414,6 +1414,27 @@ if [ -n "$_AK_BIN" ] && [ -n "$_AK_IDX" ] && [ -d "$_IB_PKGS" ]; then
     # 为什么必须放在这一步而不是更早：上面「来源 A」的 packages/*.apk 通配会把根层
     # apk 全部拷进 /root/apk-cache 打进固件。1,384 个包会凭空多几百 MB。
     # 这里来源 A 早已跑完，建链接它看不见。
+    # ---- 【2026-11-23】同名 kmod 去重：只留与内核匹配的那份 ----
+    # IB 自带的平铺 kmod 是上游内核（71cc20e3）编的，official/ 是自建 honk 内核
+    # （26ed6bc1）编的；同名同版本两份一起进索引，apk 挑哪份不确定（run #166 挑中了 71cc，
+    # 于是 kernel-26ed 被判 breaks）。所以 official/ 里已有的同名平铺 kmod 先删掉。
+    _ak_dup=0
+    for _f in "$_IB_PKGS"/kmod-*.apk; do
+        [ -f "$_f" ] || continue
+        [ -L "$_f" ] && continue
+        _db="${_f##*/}"
+        _db="${_db%.apk}"
+        _db=$(printf '%s\n' "$_db" | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//')
+        _dc=0
+        for _c in "$_IB_PKGS/official/$_db"-*.apk; do
+            [ -e "$_c" ] && { _dc=1; break; }
+        done
+        if [ "$_dc" = 1 ]; then
+            rm -f "$_f"
+            _ak_dup=$((_ak_dup + 1))
+        fi
+    done
+    echo "==> [kmod-all] 删掉与 official/ 同名的旧 kmod（上游内核版）$_ak_dup 个"
     _ib_ln_n=0
     for _f in "$_IB_PKGS"/official/*.apk; do
         [ -f "$_f" ] || continue
@@ -1462,6 +1483,51 @@ if [ -n "$_AK_BIN" ] && [ -n "$_AK_IDX" ] && [ -d "$_IB_PKGS" ]; then
     echo "==> [ib-pkgs] kmod $_ib_k 个已入索引"
 else
     echo "::warning::[ib-pkgs] 跳过：apk 工具不可用或 packages/ 不存在"
+fi
+
+# ---- 【2026-11-23 用户定】全量 kmod 在 action 阶段直接预装进固件 ----
+# 来源：official/ 全量（自建内核配套）。出厂 rootfs 里原本一个 kmod 都不带，刷完 lsmod 是空的；
+# 用户要求直接装进固件，配硬件/加功能不缺模块。
+#
+# 剥版本只认内核 ABI 前缀 `-<数字.数字.数字>`，不认 `-rN` 尾巴。
+# 反例（run #165）：kmod-aic8800-btusb-6.12.103.2026.03.10~89f865b8-r4.apk
+#   → 按 `-rN$` 剥不掉，整串文件名被当包名：is not a valid world dependency。
+# 剥完还要逐个核「根层真有 <名字>-*.apk」，核不上的宁可少装也不进 PACKAGES。
+_ak_km_all=""
+_ak_km_n=0
+_ak_km_bad=0
+if [ -n "$_IB_PKGS" ] && [ -d "$_IB_PKGS/official" ]; then
+    _ak_km_src="$_IB_PKGS/official"
+    _ak_km_raw=$(for _f in "$_ak_km_src"/kmod-*.apk; do
+        [ -e "$_f" ] || continue
+        _n="${_f##*/}"
+        _n="${_n%.apk}"
+        printf '%s\n' "$_n" | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//'
+    done | sort -u)
+    for _nm in $_ak_km_raw; do
+        [ -n "$_nm" ] || continue
+        case " $_ak_km_all " in *" $_nm "*) continue ;; esac
+        _hit=0
+        for _c in "$_IB_PKGS/$_nm"-*.apk; do
+            [ -e "$_c" ] && { _hit=1; break; }
+        done
+        if [ "$_hit" = 1 ]; then
+            _ak_km_all="$_ak_km_all $_nm"
+            _ak_km_n=$((_ak_km_n + 1))
+        else
+            _ak_km_bad=$((_ak_km_bad + 1))
+            [ "$_ak_km_bad" -le 5 ] && echo "==> [kmod-all] 跳过核不上的名字：$_nm"
+        fi
+    done
+    if [ "$_ak_km_n" -ge 1100 ]; then
+        PACKAGES="$PACKAGES $_ak_km_all"
+        echo "==> [kmod-all] 已把 $_ak_km_n 个 kmod 追加进 PACKAGES（official/ 全量（自建内核配套）；核不上跳过 $_ak_km_bad 个）"
+        echo "==> [kmod-all] 抽样：$(echo $_ak_km_all | tr ' ' '\n' | awk 'NR<=5{printf "%s ",$0}')"
+    else
+        echo "::warning::[kmod-all] 只解出 $_ak_km_n 个 kmod（阈值 1100），不做全量预装"
+    fi
+else
+    echo "::warning::[kmod-all] 找不到 $_IB_PKGS/official，跳过全量 kmod 预装"
 fi
 
 # --- manifest.txt：pkg-cache-restore.sh --all 的比对基准 ---
@@ -1519,12 +1585,53 @@ fi
 ls "$_AK_DIR" | head -n 20
 
 # ---- 唯一一遍：此时 files/ 里的包库已完整，一次合进 rootfs ----
-make image PROFILE="generic" PACKAGES="$PACKAGES" FILES="/home/build/immortalwrt/files" ROOTFS_PARTSIZE=$PROFILE
-
-if [ $? -ne 0 ]; then
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Build failed (2nd pass: apk-cache)!"
-    exit 1
-fi
+# 【2026-11-23】一次装 1300+ 个包（含全量 kmod）。上游 feed 里同名 kmod 是另一套内核
+# hash（71cc20e3），版本号却一样，apk 挑中它就会 `unable to select packages`。
+# 这里带「剔掉报错包再试」：只从问题行（breaks/required by/not found…）捞名字，
+# 单轮上限 50，最多 5 轮 —— 绝不从「已满足候选」那些行里剔。
+_ak_mk_round=0
+while :; do
+    make image PROFILE="generic" PACKAGES="$PACKAGES" FILES="/home/build/immortalwrt/files" ROOTFS_PARTSIZE=$PROFILE 2>&1 | tee /tmp/imm25-mk.log
+    _ak_mk_rc=${PIPESTATUS[0]}
+    [ "$_ak_mk_rc" = "0" ] && break
+    _ak_mk_round=$((_ak_mk_round + 1))
+    echo "==> [kmod-all] make image 第 $_ak_mk_round 次失败（rc=$_ak_mk_rc），尝试剔包重试"
+    if [ "$_ak_mk_round" -gt 5 ]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Build failed (2nd pass: apk-cache, 剔包 5 轮仍失败)!"
+        tail -n 40 /tmp/imm25-mk.log
+        exit 1
+    fi
+    if ! grep -qE 'unable to select|not found|required by|not a valid world dependency|Unknown package|conflict' /tmp/imm25-mk.log; then
+        echo "==> [kmod-all] 日志里没有「包名/依赖」类错误，是别的问题，不再重试"
+        tail -n 40 /tmp/imm25-mk.log
+        exit 1
+    fi
+    awk '/^ERROR:/{f=1} f{if (/^make\[2\]: \*\*\*/) exit; print}' /tmp/imm25-mk.log \
+        | grep -E 'breaks:|required by|not found|Unknown package|not a valid world dependency|conflict' \
+        > /tmp/imm25-mk.err
+    _ak_mk_bad=$( grep -oE '[A-Za-z0-9_.+-]+-[0-9]+\.[0-9]+\.[0-9]+' /tmp/imm25-mk.err \
+        | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//' | grep -E '^[a-z]' | sort -u)
+    _ak_mk_drop=""
+    for _b in $_ak_mk_bad; do
+        case " $PACKAGES " in *" $_b "*) _ak_mk_drop="$_ak_mk_drop $_b" ;; esac
+    done
+    _ak_drop_n=$(echo $_ak_mk_drop | wc -w)
+    if [ "$_ak_drop_n" = 0 ]; then
+        echo "==> [kmod-all] 问题行里的包名都不在 PACKAGES 里，是别的问题，不再重试"
+        head -n 20 /tmp/imm25-mk.err
+        tail -n 20 /tmp/imm25-mk.log
+        exit 1
+    fi
+    if [ "$_ak_drop_n" -gt 50 ]; then
+        echo "::error::[kmod-all] 一轮要剔 $_ak_drop_n 个包（>50），不像单个冲突，中止以免把 kmod 全剔光"
+        head -n 20 /tmp/imm25-mk.err
+        exit 1
+    fi
+    for _b in $_ak_mk_drop; do
+        PACKAGES=$(echo $PACKAGES | tr ' ' '\n' | grep -vxF "$_b" | tr '\n' ' ')
+        echo "==> [kmod-all] 从 PACKAGES 剔除 $_b"
+    done
+done
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Build completed successfully."
 
 echo "==> 离线恢复示例（固件刷好后，包被别人卸载时）："
