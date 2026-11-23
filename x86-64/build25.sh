@@ -1624,7 +1624,8 @@ echo "==> [kmod-diag] 结束"
 # apk 会判定"官方更新"，其实装的是 5 月的旧数据。这里把 run 包里的最新点分日期版本
 # 钉进 PACKAGES，逼 apk 用新的那份。
 for _ak_ng in v2ray-geoip v2ray-geosite; do
-    _ak_ngv=$(ls "$_AK_DIR"/"$_ak_ng"-[0-9]*.apk 2>/dev/null \
+    # 从 packages/ 取：run 包的 geo apk 会被排除出库，_AK_DIR 里没有它们
+    _ak_ngv=$(ls packages/"$_ak_ng"-[0-9]*.apk 2>/dev/null \
         | sed 's#.*/##; s/\.apk$//' \
         | sed "s/^$_ak_ng-//" \
         | grep -E '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}' \
