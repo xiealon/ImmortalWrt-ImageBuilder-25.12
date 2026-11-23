@@ -234,20 +234,30 @@ _PA_DEPS="jansson4 libblkid1 libblobmsg-json20260213 libbpf1 libelf1 libgmp10 li
 # 【2026-11-23 用户定】全量 kmod 已由 build25.sh 预装进固件（1199 个），所以这里
 # 现在会取到 1199 条 —— 保护面自动扩到全量，无需另维护名单。
 # 2026-11-19 时是 212 个（当时只保护出厂装过的那批）。
-_pa_kmods() {
-    # 【2026-11-23 用户定】kmod 不再全量预装，改为「本地库挂上、按需装」。
-    # 这里给开机 --repair 用的清单 = 出厂库里的 kmod ∪ 运行侧已装的 kmod，
-    # 再过滤成「本地库真有 apk」的名字 —— 装不回来的名字不进来，免得每轮空转。
-    {
-        _pa_snap_fact_build && grep -E '^kmod-[A-Za-z0-9_.-]+$' "$_pa_snap_fact"
-        _pa_snap_inst_build && grep -E '^kmod-[A-Za-z0-9_.-]+$' "$_pa_snap_inst"
-        grep -oE '^P:kmod-[A-Za-z0-9_.-]+' "$ROMDIR/lib/apk/db/installed" 2>/dev/null | sed 's/^P://'
-    } | sort -u | while IFS= read -r _pk; do
-        [ -n "$_pk" ] || continue
-        for _pf in /rom/root/apk-cache/"$_pk"-*.apk; do
-            [ -e "$_pf" ] && { printf '%s\n' "$_pk"; break; }
-        done
-    done
+# 【2026-11-23】kmod 全量预装后是 1,200+ 个，逐个 grep / 逐个 apk info 会让开机那次
+# --repair 白等好几秒。这里改成一次性 comm 求差，固定几条命令，与数量无关：
+#   期望 = 出厂库里的 kmod  ∩  本地包里真有 apk 的（装不回来的名字不进来）
+#   实有 = 运行侧已装快照里的 kmod
+#   缺的 = 期望 - 实有
+_pa_missing_kmods() {
+    _pa_snap_fact_build || return 0
+    _pa_snap_inst_build || return 0
+    _pa_mk_exp=/tmp/.pa-kmod-exp.$$
+    _pa_mk_have=/tmp/.pa-kmod-have.$$
+    _pa_mk_cache=/tmp/.pa-kmod-cache.$$
+    grep -E '^kmod-[A-Za-z0-9_.-]+$' "$_pa_snap_fact" | sort -u > "$_pa_mk_exp"
+    ls /rom/root/apk-cache 2>/dev/null \
+        | sed -n 's/\.apk$//p' \
+        | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//' \
+        | grep -E '^kmod-' | sort -u > "$_pa_mk_cache"
+    if [ -s "$_pa_mk_cache" ]; then
+        comm -12 "$_pa_mk_exp" "$_pa_mk_cache" > "$_pa_mk_exp.ok"
+    else
+        cp "$_pa_mk_exp" "$_pa_mk_exp.ok"
+    fi
+    grep -E '^kmod-[A-Za-z0-9_.-]+$' "$_pa_snap_inst" | sort -u > "$_pa_mk_have"
+    comm -23 "$_pa_mk_exp.ok" "$_pa_mk_have"
+    rm -f "$_pa_mk_exp" "$_pa_mk_cache" "$_pa_mk_exp.ok" "$_pa_mk_have"
 }
 
 # 【2026-11-19 用户定】开机补充组：**只走开机那一次 --repair**，不进 _PA_LIST / --check / --list。
@@ -279,18 +289,14 @@ _pa_missing_boot() {
 
 # 依赖组里「该有却没有」的（只给 --repair 用；--check 不调它）
 _pa_missing_deps() {
-    _pa_md=""
-    for _pa_p in $_PA_DEPS $(_pa_kmods); do
-        # kmod 不过 _pa_should：用户后来自己装的 kmod 不在出厂库里，
-        # 过那道闸门会被永久跳过。_pa_kmods 已经保证只在「库里有 apk」的范围内。
-        case "$_pa_p" in
-        kmod-*) : ;;
-        *) _pa_should "$_pa_p" || continue ;;
-        esac
+    # 库（45 个）：逐个判定，走 _pa_should + 已装
+    for _pa_p in $_PA_DEPS; do
+        _pa_should "$_pa_p" || continue
         _pa_installed "$_pa_p" && continue
-        _pa_md="$_pa_md $_pa_p"
+        printf '%s\n' "$_pa_p"
     done
-    printf '%s\n' "$_pa_md" | sed 's/^ *//'
+    # kmod：1,200+ 个，一次性 comm 求差（见 _pa_missing_kmods）
+    _pa_missing_kmods
 }
 
 log() { printf '[APP] %s\n' "$*"; }
