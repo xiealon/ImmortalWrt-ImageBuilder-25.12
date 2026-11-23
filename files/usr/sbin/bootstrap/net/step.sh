@@ -708,7 +708,7 @@ build_lan_static() {
     # 为什么是 delete 而不是 set '0'：uci 里 disabled 只要不是 "1" 就等同启用，
     # 删掉能让配置回到最干净的状态，和固件初始配置一致。
     run uci -q delete network.lan.disabled
-    run uci -q delete network.lan6.disabled
+    run uci -q delete network.lan6 2>/dev/null
     run uci -q set network.lan.proto='static'
     run uci -q set network.lan.device='br-lan'
     run uci -q set network.lan.ipaddr="$1"
@@ -734,10 +734,10 @@ build_lan_static() {
     # 真正的 reload 仍由 build_NETBASE 末尾的 flush_uci 统一做（那里还会重接容器 veth），
     # 这里只保证「配置已定稿」，不碰网络。
     if ! run uci -q commit network 2>/dev/null; then
-        log "[LAN] commit network 失败（lan/lan6 只在内存里，重启即丢）"
+        log "[LAN] commit network 失败（lan 只在内存里，重启即丢）"
         return 1
     fi
-    log "[LAN] 已提交：lan 静态地址 $1/$2 网关 $3 DNS $4 + lan6（dhcpv6, peerdns=0）"
+    log "[LAN] 已提交：lan 静态地址 $1/$2 网关 $3 DNS $4（不做 IPv6）"
     # 【2026-11-15 用户定】不再做「ULA 没下发就 ifup」的自愈。
     # ip6assign + ip6ifaceid 设好，netifd 自己会生成地址；额外盯着它只会带来副作用
     # ——ifup 本身会触发 rfc9096 前缀抖动，反而把本来好的 ULA 标成 stale。
@@ -952,7 +952,7 @@ build_lan_input() {
     # 不在列表里 → IPv6 包不属于任何 zone → 按默认策略 DROP。
     # 【2026-11-23 用户定】不做 IPv6：不再把 lan6 挂进 zone（有残留就删掉）
     run uci -q del_list "firewall.$_lz.network=lan6" 2>/dev/null
-    log "[FW] lan zone input/forward 已置 ACCEPT（含 lan6）"
+    log "[FW] lan zone input/forward 已置 ACCEPT"
     return 0
 }
 # 旁路由网络基线入口（v.78-bp）：五对象独立预检，哪项不符只重建哪项
