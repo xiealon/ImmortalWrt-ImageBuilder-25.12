@@ -1637,36 +1637,37 @@ for _ak_ng in v2ray-geoip v2ray-geosite; do
     fi
 done
 
-# ---- 唯一一遍：此时 files/ 里的包库已完整，一次合进 rootfs ----
-# 【2026-11-23】官方源里没有一批 profile 默认 kmod（实测：kmod-acpi-call /
-# kmod-gpio-pwm / kmod-hwmon-pwmfan），硬装就 `no such package ... world[...]` →
-# package_install Error 3。这里带「剔掉取不到的、重试」：把 world[X] 里的 X 从
-# PACKAGES 与 profiles.json 一起删掉，最多 3 轮；不是这类错就立刻中止。
-# 这些是 x86 上给传感器/风扇用的可选模块，没有不影响使用。
-_ak_mk_round=0
-while :; do
-    make image PROFILE="generic" PACKAGES="$PACKAGES" FILES="/home/build/immortalwrt/files" ROOTFS_PARTSIZE=$PROFILE 2>&1 | tee /tmp/imm25-mk.log
-    _ak_mk_rc=${PIPESTATUS[0]}
-    [ "$_ak_mk_rc" = "0" ] && break
-    _ak_mk_round=$((_ak_mk_round + 1))
-    echo "==> [mk] make image 第 $_ak_mk_round 次失败（rc=$_ak_mk_rc）"
-    if [ "$_ak_mk_round" -gt 3 ]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Build failed (2nd pass: apk-cache, 3 轮仍失败)!"
-        tail -n 40 /tmp/imm25-mk.log
-        exit 1
-    fi
-    _ak_drop=$(sed -nE 's/^ *([A-Za-z0-9_.+-]+) \(no such package\):.*/\1/p; s/.*world\[([A-Za-z0-9_.+-]+)\].*/\1/p' /tmp/imm25-mk.log | sort -u)
-    if [ -z "$_ak_drop" ]; then
-        echo "==> [mk] 日志里没有「no such package / world[...]」类错误，是别的问题，不再重试"
-        tail -n 40 /tmp/imm25-mk.log
-        exit 1
-    fi
-    echo "==> [mk] 官方源取不到，剔除：$(echo $_ak_drop | tr '\n' ' ')"
-    for _b in $_ak_drop; do
-        PACKAGES=$(echo $PACKAGES | tr ' ' '\n' | grep -vxF "$_b" | tr '\n' ' ')
-        # profiles.json 里也删掉（IB 会把 profile 默认包并进 world）
-        if [ -f profiles.json ]; then
-            python3 - "$_b" <<'PY'
+# ---- 两遍式：先编一遍拿到真实安装清单，把缺的包补进本地库，再编一遍 ----
+# 【2026-11-23 用户定】不自作聪明裁范围：固件装了什么，本地库就备份什么（用户原话：
+# 「差这几兆空间吗？」）。所以：
+#   第 1 遍 make image → 读镜像里的 lib/apk/db/installed（真实 607 个包）
+#   → 与本地库对照，把没备份的按名字抓进 files/root/apk-cache
+#   → 重建库索引 → 第 2 遍 make image（这次库里的东西一起进 squashfs）
+# 抓包优先用 IB 自带的 apk fetch（它自己解析文件名），失败再在 IB 目录里找现成 apk。
+_ak_mk_image() {
+    _ak_mk_round=0
+    while :; do
+        make image PROFILE="generic" PACKAGES="$PACKAGES" FILES="/home/build/immortalwrt/files" ROOTFS_PARTSIZE=$PROFILE 2>&1 | tee /tmp/imm25-mk.log
+        _ak_mk_rc=${PIPESTATUS[0]}
+        [ "$_ak_mk_rc" = "0" ] && return 0
+        _ak_mk_round=$((_ak_mk_round + 1))
+        echo "==> [mk] make image 第 $_ak_mk_round 次失败（rc=$_ak_mk_rc）"
+        if [ "$_ak_mk_round" -gt 3 ]; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Build failed (2nd pass: apk-cache, 3 轮仍失败)!"
+            tail -n 40 /tmp/imm25-mk.log
+            exit 1
+        fi
+        _ak_drop=$(sed -nE 's/^ *([A-Za-z0-9_.+-]+) \(no such package\):.*/\1/p; s/.*world\[([A-Za-z0-9_.+-]+)\].*/\1/p' /tmp/imm25-mk.log | sort -u)
+        if [ -z "$_ak_drop" ]; then
+            echo "==> [mk] 日志里没有「no such package / world[...]」类错误，是别的问题，不再重试"
+            tail -n 40 /tmp/imm25-mk.log
+            exit 1
+        fi
+        echo "==> [mk] 官方源取不到，剔除：$(echo $_ak_drop | tr '\n' ' ')"
+        for _b in $_ak_drop; do
+            PACKAGES=$(echo $PACKAGES | tr ' ' '\n' | grep -vxF "$_b" | tr '\n' ' ')
+            if [ -f profiles.json ]; then
+                python3 - "$_b" <<'PY'
 import json, sys
 name = sys.argv[1]
 try:
@@ -1682,9 +1683,57 @@ for prof in (d.get("profiles") or {}).values():
 if ch:
     json.dump(d, open("profiles.json", "w"), ensure_ascii=False, indent=1)
 PY
-        fi
+            fi
+        done
     done
-done
+}
+
+echo "==> [backup-all] 第 1 遍 make image（拿真实安装清单）"
+_ak_mk_image
+
+_tgz=$(ls bin/targets/x86/64/*rootfs.tar.gz 2>/dev/null | head -n1)
+if [ -n "$_tgz" ]; then
+    tar -xzOf "$_tgz" lib/apk/db/installed 2>/dev/null | sed -n 's/^P://p' | sort -u > /tmp/installed.txt
+    _ak_inst_n=$(grep -c . /tmp/installed.txt 2>/dev/null) || _ak_inst_n=0
+    ls "$_AK_DIR" 2>/dev/null | sed -n 's/\.apk$//p' \
+        | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//; s/-[0-9]{8,}.*$//' | sort -u > /tmp/incache.txt
+    grep -x -v -F -f /tmp/incache.txt /tmp/installed.txt > /tmp/needbk.txt 2>/dev/null
+    _ak_need_n=$(grep -c . /tmp/needbk.txt 2>/dev/null) || _ak_need_n=0
+    echo "==> [backup-all] 装机 $_ak_inst_n 个包，本地库已有 $(grep -c . /tmp/incache.txt) 个，待补 $_ak_need_n 个"
+
+    printf 'file://%s\n' "$(pwd)/$_AK_DIR/packages.adb" > /tmp/bk-repos.txt
+    cat repositories >> /tmp/bk-repos.txt 2>/dev/null
+
+    _bk_ok=0
+    _bk_bad=0
+    while IFS= read -r _p; do
+        [ -n "$_p" ] || continue
+        if ( cd "$_AK_DIR" && "$_AK_BIN" --allow-untrusted --repositories-file /tmp/bk-repos.txt fetch "$_p" ) >/dev/null 2>&1; then
+            _bk_ok=$((_bk_ok + 1))
+            continue
+        fi
+        _f=$(find . -maxdepth 4 -name "$_p-[0-9]*.apk" 2>/dev/null | head -n1)
+        if [ -n "$_f" ]; then
+            cp -f "$_f" "$_AK_DIR"/ && _bk_ok=$((_bk_ok + 1))
+        else
+            _bk_bad=$((_bk_bad + 1))
+            echo "==> [backup-all] 抓不到：$_p"
+        fi
+    done < /tmp/needbk.txt
+
+    echo "==> [backup-all] 补齐 $_bk_ok 个，抓不到 $_bk_bad 个"
+    if [ "$_bk_ok" -gt 0 ]; then
+        ( cd "$_AK_DIR" && ls *.apk 2>/dev/null | sed 's#^#./#' > /tmp/aklist.txt \
+          && rm -f packages.adb \
+          && "$_AK_BIN" --allow-untrusted "$_AK_IDX" -o packages.adb $(cat /tmp/aklist.txt) ) >/tmp/bk-index.log 2>&1 \
+          && echo "==> [backup-all] 库索引已重建（$(wc -c < "$_AK_DIR/packages.adb") 字节，$(ls "$_AK_DIR"/*.apk | wc -l) 个 apk）" \
+          || { echo "::warning::[backup-all] 库索引重建失败，看 /tmp/bk-index.log"; tail -5 /tmp/bk-index.log; }
+    fi
+    echo "==> [backup-all] 第 2 遍 make image（把补齐的包一起打进固件）"
+    _ak_mk_image
+else
+    echo "::warning::[backup-all] 找不到 rootfs.tar.gz，跳过全量备份，只编一遍"
+fi
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Build completed successfully."
 
 echo "==> 离线恢复示例（固件刷好后，包被别人卸载时）："
