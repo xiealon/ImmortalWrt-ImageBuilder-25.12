@@ -1585,31 +1585,13 @@ fi
 ls "$_AK_DIR" | head -n 20
 
 # ---- 唯一一遍：此时 files/ 里的包库已完整，一次合进 rootfs ----
-# 【2026-11-23 用户定】官方 feed 的 kmod 一律不要。
-#   上游 25.12.2 的 packages feed 提供一整套内核 71cc20e3 编的 kmod，
-#   与我们自建内核 26ed6bc1 的 kmod 同名同版本（都是 6.12.103-r1），
-#   apk 会挑中上游那份，于是
-#     ERROR: unable to select packages:
-#       kernel-6.12.103~26ed6bc1...: breaks: kmod-ip6-vti[kernel=...71cc20e3...]
-#   官方 kmod 装进我们的内核也跑不起来（vermagic 不符），所以直接把这条 feed
-#   从 repositories 里摘掉，让官方 kmod 根本不参与求解。
-#   万一这条 feed 还担着别的包（摘掉后报某个非 kmod 包 not found），
-#   下面会自动恢复 repositories 再试一次，绝不丢包。
-_ak_repo_bak=/tmp/repositories.kmodoff
-_ak_repo_off=0
-if [ -f repositories ]; then
-    cp -f repositories "$_ak_repo_bak"
-    awk '!/\/packages\/x86_64\/packages\/packages\.adb$/' "$_ak_repo_bak" > /tmp/repositories.new
-    if [ -s /tmp/repositories.new ]; then
-        cat /tmp/repositories.new > repositories
-        _ak_repo_off=1
-        echo "==> [kmod-all] repositories 已摘掉官方 packages feed（71cc kmod 来自这里），剩 $(grep -c . repositories) 条："
-        sed 's|^|      |' repositories
-    else
-        echo "::warning::[kmod-all] 摘掉官方 packages feed 后一条都不剩，保持原样"
-    fi
-fi
-
+# 【2026-11-23】一次装 1600+ 个包（含全量 kmod）。两类失败都自动处理：
+#  ① 官方 feed 里同名 kmod 是另一套内核 hash（71cc20e3），apk 偶尔挑中它 →
+#     unable to select / breaks: → 剔掉那个包（它的官方版本本来也装不进 26ed 内核）。
+#  ② 互斥变体互相覆盖同一 .ko →
+#     ERROR: kmod-ath10k-ct-...: trying to overwrite ... owned by kmod-ath10k-...
+#     → 剔掉「试图覆盖」的那个变体，留主流那份（ct / smallbuffers / vendor 都是变体）。
+# 只从问题行取名字，绝不碰候选清单；单轮上限 50，最多 6 轮。
 _ak_mk_round=0
 while :; do
     make image PROFILE="generic" PACKAGES="$PACKAGES" FILES="/home/build/immortalwrt/files" ROOTFS_PARTSIZE=$PROFILE 2>&1 | tee /tmp/imm25-mk.log
@@ -1617,25 +1599,37 @@ while :; do
     [ "$_ak_mk_rc" = "0" ] && break
     _ak_mk_round=$((_ak_mk_round + 1))
     echo "==> [kmod-all] make image 第 $_ak_mk_round 次失败（rc=$_ak_mk_rc）"
-    if [ "$_ak_mk_round" -gt 5 ]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Build failed (2nd pass: apk-cache, 5 轮仍失败)!"
+    if [ "$_ak_mk_round" -gt 6 ]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Build failed (2nd pass: apk-cache, 6 轮仍失败)!"
         tail -n 40 /tmp/imm25-mk.log
         exit 1
     fi
-    if ! grep -qE 'unable to select|not found|required by|not a valid world dependency|Unknown package|conflict' /tmp/imm25-mk.log; then
-        echo "==> [kmod-all] 日志里没有「包名/依赖」类错误，是别的问题，不再重试"
+    if ! grep -qE 'unable to select|not found|no such package|required by|not a valid world dependency|Unknown package|conflict|trying to overwrite' /tmp/imm25-mk.log; then
+        echo "==> [kmod-all] 日志里没有「包名/依赖/覆盖」类错误，是别的问题，不再重试"
         tail -n 40 /tmp/imm25-mk.log
         exit 1
     fi
     awk '/^ERROR:/{f=1} f{if (/^make\[2\]: \*\*\*/) exit; print}' /tmp/imm25-mk.log \
-        | grep -E 'breaks:|required by|not found|Unknown package|not a valid world dependency|conflict' \
+        | grep -E 'breaks:|required by|not found|no such package|Unknown package|not a valid world dependency|conflict|trying to overwrite' \
         > /tmp/imm25-mk.err
-    _ak_mk_bad=$( grep -oE '[A-Za-z0-9_.+-]+-[0-9]+\.[0-9]+\.[0-9]+' /tmp/imm25-mk.err \
-        | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//' | grep -E '^[a-z]' | sort -u)
+    {
+        # ① ERROR: <包>-<版本>: ...（覆盖冲突 / world 依赖非法）—— 只取冒号前那个包
+        sed -nE 's/^ERROR: *([^:]+):.*/\1/p' /tmp/imm25-mk.err \
+            | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//'
+        # ② <包> (no such package):
+        sed -nE 's/^ *([A-Za-z0-9_.+-]+) \(no such package\).*/\1/p' /tmp/imm25-mk.err
+        # ③ breaks: / required by 行里带版本的包名
+        grep -E 'breaks:|required by|not a valid world dependency' /tmp/imm25-mk.err \
+            | grep -oE '[A-Za-z0-9_.+-]+-[0-9]+\.[0-9]+\.[0-9]+' \
+            | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//'
+        # ④ 引号点名的包
+        grep -oE "'[A-Za-z0-9_.~+-]+'" /tmp/imm25-mk.err | tr -d "'"
+    } 2>/dev/null | grep -E '^[a-z]' | sort -u > /tmp/imm25-mk.drop
     _ak_mk_drop=""
-    for _b in $_ak_mk_bad; do
+    while IFS= read -r _b; do
+        [ -n "$_b" ] || continue
         case " $PACKAGES " in *" $_b "*) _ak_mk_drop="$_ak_mk_drop $_b" ;; esac
-    done
+    done < /tmp/imm25-mk.drop
     _ak_drop_n=$(echo $_ak_mk_drop | wc -w)
     if [ "$_ak_drop_n" = 0 ]; then
         echo "==> [kmod-all] 问题行里的包名都不在 PACKAGES 里，是别的问题，不再重试"
@@ -1643,19 +1637,8 @@ while :; do
         tail -n 20 /tmp/imm25-mk.log
         exit 1
     fi
-    # 出现「非 kmod 包」缺失 → 说明摘掉那条 feed 太狠了，恢复 repositories 再试一次
-    _ak_has_non_kmod=0
-    for _b in $_ak_mk_drop; do
-        case "$_b" in kmod-*) : ;; *) _ak_has_non_kmod=1 ;; esac
-    done
-    if [ "$_ak_has_non_kmod" = 1 ] && [ "$_ak_repo_off" = 1 ]; then
-        echo "==> [kmod-all] 缺的是非 kmod 包（$_ak_mk_drop），说明那条 feed 还担着别的包，恢复 repositories 重试"
-        cp -f "$_ak_repo_bak" repositories
-        _ak_repo_off=0
-        continue
-    fi
     if [ "$_ak_drop_n" -gt 50 ]; then
-        echo "::error::[kmod-all] 一轮要剔 $_ak_drop_n 个包（>50），不像单个冲突，中止以免把 kmod 全剔光"
+        echo "::error::[kmod-all] 一轮要剔 $_ak_drop_n 个包（>50），不像个别冲突，中止以免把 kmod 全剔光"
         head -n 20 /tmp/imm25-mk.err
         exit 1
     fi
@@ -1664,9 +1647,6 @@ while :; do
         echo "==> [kmod-all] 从 PACKAGES 剔除 $_b"
     done
 done
-if [ "$_ak_repo_off" = 1 ]; then
-    echo "==> [kmod-all] 全程未使用官方 packages feed（官方 kmod 未参与求解）"
-fi
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Build completed successfully."
 
 echo "==> 离线恢复示例（固件刷好后，包被别人卸载时）："
