@@ -383,13 +383,7 @@ verify_dhcp_ignore() {
     # 验的是 build 写进去的那套值，任一项不符就判需修复。
     [ -z "$(run uci -q get dhcp.lan.ignore 2>/dev/null)" ] || return 1
     [ "$(run uci -q get dhcp.lan.dhcpv4 2>/dev/null)" = "disabled" ] || return 1
-    # 有 ipv6_off 标记时判 disabled，否则按原设计判 server/high
-    if [ -f /etc/config/ipv6_off ]; then
-        [ "$(run uci -q get dhcp.lan.ra 2>/dev/null)" = "disabled" ] || return 1
-    else
-        [ "$(run uci -q get dhcp.lan.ra 2>/dev/null)" = "server" ] || return 1
-        [ "$(run uci -q get dhcp.lan.ra_preference 2>/dev/null)" = "high" ] || return 1
-    fi
+    # 【2026-11-23 用户定】不再校验 RA 相关项（彻底不管 IPv6）
     # 【2026-11-15 用户定】dns_service 必须为空（删掉），靠 odhcpd 默认值 = true。
     # 写成显式的 0 才是真的关掉 RDNSS —— 那属于手改，判失败让 build 删掉。
     [ -z "$(run uci -q get dhcp.lan.dns_service 2>/dev/null)" ] || return 1
@@ -790,22 +784,13 @@ build_dhcp_ignore() {
     # DHCPv6 Information-request（超时后回退到 RDNSS），不影响功能。
     run uci -q delete dhcp.lan.ignore
     run uci -q set dhcp.lan.dhcpv4='disabled'
-    # 【2026-11-23 用户定】有 /etc/config/ipv6_off 标记（98-ipv6-off.sh 首开创建）就关 RA，
-    # 否则维持原设计（自己发 RA 抢默认路由）。用户要 hand-add v6 时删掉标记即可。
-    if [ -f /etc/config/ipv6_off ]; then
-        run uci -q set dhcp.lan.ra='disabled'
-        run uci -q set dhcp.lan.dhcpv6='disabled'
-        run uci -q set dhcp.lan.ndp='disabled'
-        run uci -q delete dhcp.lan.ra_preference
-    else
-        run uci -q set dhcp.lan.ra='server'
-    fi
+    # 【2026-11-23 用户定】彻底不管 IPv6：原「自己发 RA 抢默认路由」的设计已废弃，
+    # 这里不再写 ra/dhcpv6/ndp/ra_preference（98-ipv6-off.sh 首开设一次 disabled 即可）。
     # 【2026-11-14 用户定】不写 dhcpv6：地址由 SLAAC 下发，不需要有状态 DHCPv6。
     # 实测（192.168.1.201）：dhcpv6 关着，Windows 一样从 RA 拿到 8c01 段地址
     # （PrefixOrigin=RouterAdvertisement）。开着反而有风险——一旦 ra_flags 带
     # managed-config，它会真去分配地址，可能又抢到光猫的 8c00 段。
     # 固件 /rom/etc/uci-defaults/15_odhcpd 本来就写 disabled，保持默认即可。
-    [ -f /etc/config/ipv6_off ] || run uci -q set dhcp.lan.ra_preference='high'
     # 【2026-11-15 用户定】dns_service 也删掉，不写 1。
     # odhcpd 源码 clean_interface() 里它默认就是 true（config.c:331），删掉照样发 RDNSS；
     # 留个显式值只会多一个会被手改的项。实测：删掉后 RA 里 RDNSS 正常出现。
