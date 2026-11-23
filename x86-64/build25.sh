@@ -1465,32 +1465,53 @@ else
 fi
 
 # ---- 【2026-11-23 用户定】全量 kmod 在 action 阶段直接预装进固件 ----
-# 本地库 official/ 里是自建内核配套的 1199 个 kmod，过去只当「被删了能装回来」的备份，
-# 出厂 rootfs 里一个都不在。用户要求装进固件：刷完 lsmod 就有，配硬件/加功能不缺模块。
-# 名字从文件名剥版本：kmod-rtw88-8822c-6.12.103-r1.apk → kmod-rtw88-8822c
-# 不能按「最后一个连字符」截：kmod-8139cp / kmod-nls-iso8859-1 / kmod-rtw88-8822c
-# 的包名自带连字符与数字（2026-11-17 同名校验就栽在这上面，删过 44 个真 kmod）。
-# 内核版本一定带点（6.12.103），所以只认 `-<数字.数字>-r<数字>` 这一种尾巴。
+# 来源：official/ 全量（自建内核配套）。出厂 rootfs 里原本一个 kmod 都不带，刷完 lsmod 空；
+# 用户要求直接装进固件，配硬件/加功能不缺模块。
+#
+# 剥版本只认内核 ABI 前缀 `-<数字.数字.数字>`，**不认 `-rN` 尾巴**。
+# 反例（run #165 实测，直接炸构建）：
+#     kmod-aic8800-btusb-6.12.103.2026.03.10~89f865b8-r4.apk
+#   版本里带上游日期和 ~hash，按 `-rN$` 剥不掉，整串文件名被当成包名：
+#     ERROR: 'kmod-aic8800-btusb-6.12.103.2026.03.10~89f865b8-r4'
+#            is not a valid world dependency
+#     make[2]: *** [Makefile:254: package_install] Error 99
+# 剥完还要逐个核「根层真有 <名字>-*.apk」，核不上的宁可少装也不进 PACKAGES。
 _ak_km_all=""
+_ak_km_n=0
+_ak_km_bad=0
 if [ -n "$_IB_PKGS" ] && [ -d "$_IB_PKGS/official" ]; then
-    _ak_km_all=$(for _f in "$_IB_PKGS"/official/kmod-*.apk; do
-        [ -f "$_f" ] || continue
+    _ak_km_src="$_IB_PKGS/official"
+    _ak_km_raw=$(for _f in "$_ak_km_src"/kmod-*.apk; do
+        [ -e "$_f" ] || continue
         _n="${_f##*/}"
         _n="${_n%.apk}"
-        printf '%s\n' "$_n" | sed -E 's/-[0-9]+(\.[0-9]+)+-r[0-9]+$//'
-    done | sort -u | tr '\n' ' ')
-    _ak_km_n=$(echo $_ak_km_all | wc -w)
-    if [ "$_ak_km_n" -lt 1100 ]; then
-        echo "::error::全量 kmod 名单只解出 $_ak_km_n 个（预期 1199），文件名规则可能变了"
-        ls "$_IB_PKGS"/official/kmod-*.apk 2>/dev/null | head -n 3
-        exit 1
+        printf '%s\n' "$_n" | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//'
+    done | sort -u)
+    for _nm in $_ak_km_raw; do
+        [ -n "$_nm" ] || continue
+        case " $_ak_km_all " in *" $_nm "*) continue ;; esac
+        _hit=0
+        for _c in "$_IB_PKGS/$_nm"-*.apk; do
+            [ -e "$_c" ] && { _hit=1; break; }
+        done
+        if [ "$_hit" = 1 ]; then
+            _ak_km_all="$_ak_km_all $_nm"
+            _ak_km_n=$((_ak_km_n + 1))
+        else
+            _ak_km_bad=$((_ak_km_bad + 1))
+            [ "$_ak_km_bad" -le 5 ] && echo "==> [kmod-all] 跳过核不上的名字：$_nm"
+        fi
+    done
+    if [ "$_ak_km_n" -ge 1100 ]; then
+        PACKAGES="$PACKAGES $_ak_km_all"
+        echo "==> [kmod-all] 已把 $_ak_km_n 个 kmod 追加进 PACKAGES（official/ 全量（自建内核配套）；核不上跳过 $_ak_km_bad 个）"
+        echo "==> [kmod-all] 抽样：$(echo $_ak_km_all | tr ' ' '\n' | awk 'NR<=5{printf "%s ",$0}')"
+    else
+        echo "::warning::[kmod-all] 只解出 $_ak_km_n 个 kmod（阈值 1100），不做全量预装"
     fi
-    PACKAGES="$PACKAGES $_ak_km_all"
-    echo "==> [kmod-all] 已把 $_ak_km_n 个 kmod 追加进 PACKAGES（来自 official/ 全量）"
-    echo "==> [kmod-all] 抽样：$(echo $_ak_km_all | tr ' ' '\n' | head -n 5 | tr '\n' ' ')"
 else
     echo "::warning::[kmod-all] 找不到 $_IB_PKGS/official，跳过全量 kmod 预装"
-fi
+ fi
 
 # --- manifest.txt：pkg-cache-restore.sh --all 的比对基准 ---
 # apk 文件名是 <包名>-<版本>.apk，版本一定以数字开头，所以从「-数字」处截断。
@@ -1547,9 +1568,10 @@ fi
 ls "$_AK_DIR" | head -n 20
 
 # ---- 唯一一遍：此时 files/ 里的包库已完整，一次合进 rootfs ----
-# 【2026-11-23】一次装 1300+ 个包（含 1199 个 kmod）。个别 kmod 若因索引/依赖问题
-# 装不上，直接失败等于白跑十几分钟。这里带「剔掉报错包再试」：从日志里捞出装了却
-# 取不到的包名，去掉后重试，最多 3 轮；捞不到包名（真错误，不是包问题）立刻中止。
+# 【2026-11-23】一次装 1300+ 个包（含全量 kmod）。个别 kmod 若索引/命名有问题，
+# 直接失败等于白跑十几分钟。这里带「剔掉报错包再试」：从日志捞包名（三种错都认：
+# not found / unable to select / not a valid world dependency / Unknown package），
+# 去掉后重试，最多 3 轮；捞不到包名（真错误）立刻中止。
 _ak_mk_round=0
 while :; do
     make image PROFILE="generic" PACKAGES="$PACKAGES" FILES="/home/build/immortalwrt/files" ROOTFS_PARTSIZE=$PROFILE 2>&1 | tee /tmp/imm25-mk.log
@@ -1562,13 +1584,18 @@ while :; do
         tail -n 40 /tmp/imm25-mk.log
         exit 1
     fi
-    if ! grep -qE 'not found|unable to select|required by' /tmp/imm25-mk.log; then
-        echo "==> [kmod-all] 日志里没有「取不到包」类错误，是别的问题，不再重试"
+    if ! grep -qE 'not found|unable to select|required by|not a valid world dependency|Unknown package' /tmp/imm25-mk.log; then
+        echo "==> [kmod-all] 日志里没有「包名/取不到包」类错误，是别的问题，不再重试"
         tail -n 40 /tmp/imm25-mk.log
         exit 1
     fi
-    _ak_mk_bad=$(grep -oE 'kmod-[A-Za-z0-9_.-]+-[0-9]+(\.[0-9]+)+-r[0-9]+' /tmp/imm25-mk.log \
-        | sed -E 's/-[0-9]+(\.[0-9]+)+-r[0-9]+$//' | sort -u)
+    # ① 带引号被点名的包（is not a valid world dependency / Unknown package）
+    # ② 日志里出现的 kmod-<名字>-<版本> 长名
+    # 只从「报错行」里捞，避免把日志里正常打印的包名当坏包剔掉。
+    grep -E 'not a valid world dependency|Unknown package|not found|unable to select' /tmp/imm25-mk.log > /tmp/imm25-mk.err
+    _ak_mk_bad=$( { grep -oE "'[A-Za-z0-9_.~+-]+'" /tmp/imm25-mk.err | tr -d "'"
+                    grep -oE 'kmod-[A-Za-z0-9_.-]+-[0-9]+(\.[0-9]+)+' /tmp/imm25-mk.err ; } \
+        | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//' | grep -E '^[A-Za-z]' | sort -u)
     _ak_mk_drop=""
     for _b in $_ak_mk_bad; do
         case " $PACKAGES " in *" $_b "*) _ak_mk_drop="$_ak_mk_drop $_b" ;; esac
@@ -1583,7 +1610,6 @@ while :; do
         echo "==> [kmod-all] 从 PACKAGES 剔除 $_b"
     done
 done
-
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Build completed successfully."
 
 echo "==> 离线恢复示例（固件刷好后，包被别人卸载时）："
