@@ -18,26 +18,6 @@ uci set dhcp.lan.dhcpv6='disabled'
 uci set dhcp.lan.ndp='disabled'
 uci commit dhcp || exit 1
 
-# 【2026-11-23 用户定】连 link-local 也不要：把 disable_ipv6 写进 /etc/sysctl.conf。
-# 写 overlay 而不是固件里只读的 sysctl.d —— 以后想开 IPv6，把这三行删掉（或改成 0）
-# 并重启即可，不需要换固件。
-if ! grep -q 'net.ipv6.conf.all.disable_ipv6' /etc/sysctl.conf 2>/dev/null; then
-    {
-        echo ''
-        echo '# ipv6 off (added by 98-ipv6-off.sh)'
-        echo 'net.ipv6.conf.all.disable_ipv6 = 1'
-        echo 'net.ipv6.conf.default.disable_ipv6 = 1'
-        echo 'net.ipv6.conf.lo.disable_ipv6 = 1'
-    } >> /etc/sysctl.conf
-fi
-sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1
-sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1
-sysctl -w net.ipv6.conf.lo.disable_ipv6=1 >/dev/null 2>&1
-for _d in $(ls /proc/sys/net/ipv6/conf/ 2>/dev/null); do
-    [ "$_d" = "all" ] && continue
-    [ "$_d" = "default" ] && continue
-    sysctl -w "net.ipv6.conf.$_d.disable_ipv6=1" >/dev/null 2>&1
-done
 
 /etc/init.d/odhcpd restart >/dev/null 2>&1 || true
 logger -t ipv6-off "LAN RA/DHCPv6/NDP 已关闭（一次性开机脚本）" 2>/dev/null
