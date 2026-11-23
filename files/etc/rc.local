@@ -155,7 +155,12 @@ if [ -x "$PA_RESTORE" ]; then
     if _run_capped 30 /bin/sh "$PA_RESTORE" --check >/dev/null 2>&1; then
         echo "[$(date '+%F %T')] 【应用包】主程序齐全，跳过装回" >>"$LOG"
     else
-        _run_capped 180 /bin/sh "$PA_RESTORE" --repair >>"$LOG" 2>&1
+        # 【2026-11-24 用户定】这一句不加 timeout。
+        # 实测（V4 #8，2026-11-24 01:04）：一次补 12 个包（openclash + 10 个 ruby 依赖）
+        # 撞上 timeout 180 被杀，日志记 rc=1，看着像没修好，其实包已经装完了。
+        # 补包只走 /rom 本地库（_pa_add_local 固定带 --repositories-file，断网也不等网络），
+        # 没有「网络卡死要靠 timeout 兜底」的场景；包多就多花几十秒，以装完为准。
+        /bin/sh "$PA_RESTORE" --repair >>"$LOG" 2>&1
         _pa_rc=$?
         echo "[$(date '+%F %T')] 【应用包】已尝试装回缺失项（rc=$_pa_rc，详见上方日志）" >>"$LOG"
     fi
@@ -166,7 +171,8 @@ if [ -f "$PKG_RESTORE" ]; then
     if /bin/sh "$PKG_RESTORE" --deps --check >/dev/null 2>&1; then
         echo "[$(date '+%F %T')] 【依赖文件】kmod / 数据文件齐全，跳过补回" >>"$LOG"
     else
-        _run_capped 180 /bin/sh "$PKG_RESTORE" --deps --repair >>"$LOG" 2>&1
+        # 【2026-11-24】同上，不加 timeout：只从只读基底拷文件/装本地包，不联网。
+        /bin/sh "$PKG_RESTORE" --deps --repair >>"$LOG" 2>&1
         _pk_rc=$?
         echo "[$(date '+%F %T')] 【依赖文件】已尝试从只读基底补回（rc=$_pk_rc，详见上方日志）" >>"$LOG"
     fi
