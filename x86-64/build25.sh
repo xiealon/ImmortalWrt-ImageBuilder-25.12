@@ -1623,7 +1623,8 @@ echo "==> [kmod-diag] 结束"
 _ak_repo_bak=/tmp/repositories.orig
 if [ -f repositories ]; then
     cp -f repositories "$_ak_repo_bak"
-    awk '!/\/packages\/x86_64\/packages\/packages\.adb$/' "$_ak_repo_bak" > /tmp/repositories.new
+    # ① 官方 kmods 目录（若存在）② 官方 packages feed（71cc kmod 就在这里）—— 两条一起删
+    awk '!/\/kmods\// && !/\/packages\/x86_64\/packages\/packages\.adb$/' "$_ak_repo_bak" > /tmp/repositories.new
     if [ -s /tmp/repositories.new ]; then
         cat /tmp/repositories.new > repositories
         echo "==> [kmod-all] repositories 已去掉官方 packages feed（71cc kmod 来源），剩 $(grep -c . repositories) 条："
