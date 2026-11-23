@@ -1584,6 +1584,34 @@ fi
 
 ls "$_AK_DIR" | head -n 20
 
+# ---- 【2026-11-23】诊断：kmod-ip6-vti 到底从哪来 ----
+echo "==> [kmod-diag] cwd=$(pwd)"
+echo "==> [kmod-diag] repositories：" && sed 's|^|      |' repositories 2>/dev/null
+echo "==> [kmod-diag] 全树找 kmod-ip6-vti（深度 4）："
+find . -maxdepth 4 -name 'kmod-ip6-vti*' 2>/dev/null | sed 's|^|      |' || true
+echo "==> [kmod-diag] packages/ 根层 ip6-vti 文件："
+ls -l packages 2>/dev/null | grep -i 'ip6-vti' || echo "      （无）"
+echo "==> [kmod-diag] packages/official/ ip6-vti 文件："
+ls -l packages/official 2>/dev/null | grep -i 'ip6-vti' || echo "      （无）"
+echo "==> [kmod-diag] packages/ 下的索引文件："
+ls -l packages/*.adb packages/*/packages.adb 2>/dev/null || echo "      （无）"
+echo "==> [kmod-diag] 根索引里 ip6-vti 记录："
+grep -ao 'kmod-ip6-vti[^"]\{0,80\}' packages/packages.adb 2>/dev/null | sort -u | sed 's|^|      |' || echo "      （无）"
+echo "==> [kmod-diag] 所有子目录索引里 ip6-vti 记录："
+for _adbi in packages/*/packages.adb; do
+    [ -f "$_adbi" ] || continue
+    echo "      --- $_adbi"
+    grep -ao 'kmod-ip6-vti[^"]\{0,80\}' "$_adbi" 2>/dev/null | sort -u | sed 's|^|          |' || true
+done
+echo "==> [kmod-diag] 上游 feed 是否还可达（只取头部 1 行）："
+head -n 1 repositories 2>/dev/null | while IFS= read -r _ru; do
+    case "$_ru" in
+    http*) curl -sS -m 20 -o /dev/null -w "      %{http_code} $_ru\n" "$_ru" || echo "      取不到 $_ru" ;;
+    *) echo "      $_ru（非 http，跳过）" ;;
+    esac
+done
+echo "==> [kmod-diag] 结束"
+
 # ---- 唯一一遍：此时 files/ 里的包库已完整，一次合进 rootfs ----
 # 【2026-11-23】一次装 1600+ 个包（含全量 kmod）。两类失败都自动处理：
 #  ① 官方 feed 里同名 kmod 是另一套内核 hash（71cc20e3），apk 偶尔挑中它 →
