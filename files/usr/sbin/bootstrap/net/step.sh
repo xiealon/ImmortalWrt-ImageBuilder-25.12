@@ -950,8 +950,8 @@ build_lan_input() {
     # 【2026-11-14 加】确保 lan6 在这个 zone 的 network 列表里。
     # lan6 是独立 UCI 接口（不是 lan 的别名），fw4 按接口名匹配 zone；
     # 不在列表里 → IPv6 包不属于任何 zone → 按默认策略 DROP。
-    # 【2026-11-23 用户定】不做 IPv6：不再把 lan6 挂进 zone（有残留就删掉）
-    run uci -q del_list "firewall.$_lz.network=lan6" 2>/dev/null
+    # 【2026-11-23 用户定】不做 IPv6：这里**不碰** zone 里的 lan6 归属 ——
+    # 以后手动加 lan6 时自己 add_list，本脚本不会删（只在上面验证/写入处不管 v6）。
     log "[FW] lan zone input/forward 已置 ACCEPT"
     return 0
 }
