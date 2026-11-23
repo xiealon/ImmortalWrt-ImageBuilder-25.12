@@ -1619,24 +1619,17 @@ head -n 1 repositories 2>/dev/null | while IFS= read -r _ru; do
 done
 echo "==> [kmod-diag] 结束"
 
-# ---- 【2026-11-23 用户定】geo 数据用「点分日期」里最新的那份 ----
-# 坑：官方源用 yymmddHHMMSS 形式（20260529193437），数值上比 run 包的 2026.10.25 大，
-# apk 会判定"官方更新"，其实装的是 5 月的旧数据。这里把 run 包里的最新点分日期版本
-# 钉进 PACKAGES，逼 apk 用新的那份。
+
+# 【2026-11-23】geo 数据不再用 name=version 钉版本 —— 实测 apk 3.0.5 下这种写法会把
+# world 变成一堆不相干包的版本钉（libgcc1=2026.10.25-r1、ca-bundle=…），求解直接失败。
+# geo 内容本身已经由构建期替换保证最新：
+#   files/usr/share/v2ray/{geoip,geosite}.dat  ← Loyalsoldier 最新 release
+# 这里只把本地现成版本打出来，方便核对。
 for _ak_ng in v2ray-geoip v2ray-geosite; do
-    # 从 packages/ 取：run 包的 geo apk 会被排除出库，_AK_DIR 里没有它们
-    _ak_ngv=$(ls packages/"$_ak_ng"-[0-9]*.apk 2>/dev/null \
-        | sed 's#.*/##; s/\.apk$//' \
-        | sed "s/^$_ak_ng-//" \
-        | grep -E '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}' \
-        | sort -V | tail -n1)
-    if [ -n "$_ak_ngv" ]; then
-        PACKAGES="$PACKAGES $_ak_ng=$_ak_ngv"
-        echo "==> [geo] 钉住 $_ak_ng=$_ak_ngv（点分日期里最新）"
-    else
-        echo "==> [geo] 本地没有 $_ak_ng 的点分日期版本，沿用官方源"
-    fi
+    _ak_ngv=$(ls packages/"$_ak_ng"-[0-9]*.apk 2>/dev/null | sed 's#.*/##' | tr '\n' ' ')
+    echo "==> [geo] $_ak_ng 本地可用版本：${_ak_ngv:-无}"
 done
+echo "==> [geo] 实际 geo 数据取 files/usr/share/v2ray/*.dat（Loyalsoldier 最新）"
 
 # ---- 两遍式：先编一遍拿到真实安装清单，把缺的包补进本地库，再编一遍 ----
 # 【2026-11-23 用户定】不自作聪明裁范围：固件装了什么，本地库就备份什么（用户原话：
