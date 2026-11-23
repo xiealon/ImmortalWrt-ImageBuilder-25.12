@@ -246,10 +246,13 @@ _pa_missing_kmods() {
     _pa_mk_have=/tmp/.pa-kmod-have.$$
     _pa_mk_cache=/tmp/.pa-kmod-cache.$$
     grep -E '^kmod-[A-Za-z0-9_.-]+$' "$_pa_snap_fact" | sort -u > "$_pa_mk_exp"
-    ls /rom/root/apk-cache 2>/dev/null \
-        | sed -n 's/\.apk$//p' \
-        | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//' \
-        | grep -E '^kmod-' | sort -u > "$_pa_mk_cache"
+    # 用库索引里的真名（adbdump），别用文件名正则：0.18-r1 这类版本会漏
+    if ! apk adbdump /rom/root/apk-cache/packages.adb 2>/dev/null | sed -n 's/^ *- name: *//p' \
+            | grep -E '^kmod-' | sort -u > "$_pa_mk_cache" || [ ! -s "$_pa_mk_cache" ]; then
+        ls /rom/root/apk-cache 2>/dev/null | sed -n 's/\.apk$//p' \
+            | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//' \
+            | grep -E '^kmod-' | sort -u > "$_pa_mk_cache"
+    fi
     if [ -s "$_pa_mk_cache" ]; then
         # busybox 没有 comm（2026-11-23 设备实测：-ash: comm: not found），
         # 用 grep -x -F -f 做集合运算：交集 = 拿 l 当模式表过滤 e
@@ -304,10 +307,13 @@ _pa_missing_all() {
     _pa_a_cache=/tmp/.pa-all-cache.$$
     _pa_a_ok=/tmp/.pa-all-ok.$$
     grep -E '^[A-Za-z0-9]' "$_pa_snap_fact" | sort -u > "$_pa_a_exp"
-    ls /rom/root/apk-cache 2>/dev/null \
-        | sed -n 's/\.apk$//p' \
-        | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//; s/-[0-9]{8,}.*$//; s/-r[0-9]+$//' \
-        | grep -E '^[A-Za-z]' | sort -u > "$_pa_a_cache"
+    # 同上：库内包名取索引真名（adbdump），失败才退回文件名正则
+    if ! apk adbdump /rom/root/apk-cache/packages.adb 2>/dev/null | sed -n 's/^ *- name: *//p' \
+            | grep -E '^[A-Za-z]' | sort -u > "$_pa_a_cache" || [ ! -s "$_pa_a_cache" ]; then
+        ls /rom/root/apk-cache 2>/dev/null | sed -n 's/\.apk$//p' \
+            | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//; s/-[0-9]{8,}.*$//; s/-r[0-9]+$//' \
+            | grep -E '^[A-Za-z]' | sort -u > "$_pa_a_cache"
+    fi
     if [ -s "$_pa_a_cache" ]; then
         grep -x -F -f "$_pa_a_cache" "$_pa_a_exp" > "$_pa_a_ok" 2>/dev/null
     else
@@ -346,11 +352,10 @@ _pa_snap_fact="/tmp/.pa-factory"
 # 已装包名快照：apk list --installed 优先，其次 apk info；行形如 busybox-1.36.1-r2
 _pa_snap_inst_build() {
     [ -s "$_pa_snap_inst" ] && return 0
-    apk list --installed 2>/dev/null | awk '{print $1}' > "$_pa_snap_inst.raw"
-    [ -s "$_pa_snap_inst.raw" ] || apk info 2>/dev/null > "$_pa_snap_inst.raw"
-    sed -E 's/-[0-9][^-]*-r[0-9]+$//' "$_pa_snap_inst.raw" 2>/dev/null \
-        | grep -E '^[A-Za-z0-9]' | sort -u > "$_pa_snap_inst"
-    rm -f "$_pa_snap_inst.raw"
+    # 【2026-11-23】apk info 直接给纯包名，不需要再剥版本。
+    # 旧写法用 apk list --installed 再剥 -rN，遇到 luci-base-26.298.29275~c84adb9
+    # 这种 ~hash 版本剥不掉，导致 97 个包被误判缺失（真机实测）。
+    apk info 2>/dev/null | grep -E '^[A-Za-z0-9]' | sort -u > "$_pa_snap_inst"
     # 自检：busybox / apk 必然在，认不出就是格式变了，整份作废
     if grep -qxE 'busybox|apk' "$_pa_snap_inst"; then
         return 0
@@ -367,6 +372,8 @@ _pa_snap_fact_build() {
 }
 
 _pa_installed() {
+    # ip 由 ip-full 提供（与 _pa_should 的别名表一致）
+    [ "$1" = "ip" ] && { _pa_installed ip-full; return; }
     if _pa_snap_inst_build; then
         grep -qxF "$1" "$_pa_snap_inst"
         return
@@ -404,6 +411,18 @@ _pa_add_local() {
         apk add --no-network --allow-untrusted --force-overwrite "$1" >"$_pal_log" 2>&1
     fi
     _pal_rc=$?
+    # 【2026-11-23】索引里的 filename 与实际文件名不一致时（如
+    # kmod-ppdev-6.12.103-r1.3af3e693.apk），按名字装会报
+    # package mentioned in index not found；这里按文件路径再装一次。
+    if [ "$_pal_rc" != 0 ]; then
+        for _pf in /rom/root/apk-cache/"$1"-[0-9]*.apk; do
+            [ -e "$_pf" ] || continue
+            if apk add --allow-untrusted --force-overwrite "$_pf" >>"$_pal_log" 2>&1; then
+                _pal_rc=0
+                break
+            fi
+        done
+    fi
     rm -f "$_pal_log"
     return "$_pal_rc"
 }
