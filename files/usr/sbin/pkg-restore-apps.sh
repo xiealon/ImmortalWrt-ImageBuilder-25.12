@@ -291,6 +291,33 @@ _pa_missing_boot() {
 }
 
 # 依赖组里「该有却没有」的（只给 --repair 用；--check 不调它）
+# 【2026-11-23 用户定】全量保护：固件里装了什么，就保护什么（应用/库/kmod 一视同仁）。
+#   期望 = 出厂库(/rom)里所有包  ∩  本地库(/rom/root/apk-cache)真有 apk 的
+#   实有 = 运行侧已装快照
+#   缺的 = 期望 - 实有
+# 用 grep -x -F -f 做集合运算（busybox 没有 comm），与包数量无关。
+_pa_missing_all() {
+    _pa_snap_fact_build || return 0
+    _pa_snap_inst_build || return 0
+    _pa_a_exp=/tmp/.pa-all-exp.$$
+    _pa_a_have=/tmp/.pa-all-have.$$
+    _pa_a_cache=/tmp/.pa-all-cache.$$
+    _pa_a_ok=/tmp/.pa-all-ok.$$
+    grep -E '^[A-Za-z0-9]' "$_pa_snap_fact" | sort -u > "$_pa_a_exp"
+    ls /rom/root/apk-cache 2>/dev/null \
+        | sed -n 's/\.apk$//p' \
+        | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//; s/-[0-9]{8,}.*$//; s/-r[0-9]+$//' \
+        | grep -E '^[A-Za-z]' | sort -u > "$_pa_a_cache"
+    if [ -s "$_pa_a_cache" ]; then
+        grep -x -F -f "$_pa_a_cache" "$_pa_a_exp" > "$_pa_a_ok" 2>/dev/null
+    else
+        cp "$_pa_a_exp" "$_pa_a_ok"
+    fi
+    grep -E '^[A-Za-z0-9]' "$_pa_snap_inst" | sort -u > "$_pa_a_have"
+    grep -x -v -F -f "$_pa_a_have" "$_pa_a_ok" 2>/dev/null
+    rm -f "$_pa_a_exp" "$_pa_a_have" "$_pa_a_cache" "$_pa_a_ok"
+}
+
 _pa_missing_deps() {
     # 库（45 个）：逐个判定，走 _pa_should + 已装
     for _pa_p in $_PA_DEPS; do
@@ -487,6 +514,9 @@ _pa_missing() {
 _pa_check() {
     _pa_cm=$(_pa_missing)
     [ -n "$_pa_cm" ] && printf '%s\n' "$_pa_cm"
+    # 全量兜底：固件装过、但现在缺了的（含库与 kmod）
+    _pa_ca=$(_pa_missing_all)
+    [ -n "$_pa_ca" ] && printf '%s\n' "$_pa_ca"
     _pa_oc_bad=0
     if ! _pa_oc_files_ok; then
         printf 'openclash-core(文件缺失)\n'
@@ -587,9 +617,25 @@ _pa_repair() {
 		rm -rf /tmp/luci-modulecache/* 2>/dev/null
 		[ -x /etc/init.d/uhttpd ] && /etc/init.d/uhttpd reload >/dev/null 2>&1
 	fi
-    [ "$_pa_n" -gt 0 ] || log "无需装回（没有「该有却缺失」的应用）"
+    # 【2026-11-23】全量兜底：固件装过的一切（应用/库/kmod），缺了就按本地库装回
+    _pa_an=0
+    for _pa_p in $(_pa_missing_all); do
+        _pa_an=$((_pa_an + 1))
+        log "装回 $_pa_p（全量保护）"
+        if _pa_installed "$_pa_p"; then
+            "$_RESTORE" --force "$_pa_p" >/dev/null 2>&1 \
+                && log "装回完成 $_pa_p（强制重装）" \
+                || log "装回失败 $_pa_p（强制重装没成功）"
+        elif _pa_add_local "$_pa_p"; then
+            log "装回完成 $_pa_p（全量保护）"
+        else
+            log "装回失败 $_pa_p（本地包库没有它）"
+        fi
+    done
+    [ "$((_pa_n + _pa_an))" -gt 0 ] || log "无需装回（没有「该有却缺失」的包）"
     # 装完必须重判。apk 没有缓存，直接重算即可。
     [ -z "$(_pa_missing)" ] || return 1
+    [ -z "$(_pa_missing_all)" ] || return 1
     [ -z "$(_pa_missing_deps)" ] || return 1
     [ -z "$(_pa_missing_boot)" ] || return 1
     if ! _pa_oc_files_ok; then
