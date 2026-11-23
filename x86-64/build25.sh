@@ -1082,7 +1082,7 @@ done
 echo "==> [apk-cache] 来源 C3（全量 kmod）：$_ak_c3 个 apk"
 # 收 0 个说明 packages/official/ 没就位（workflow 的 1688 包全集那步没跑或路径变了），
 # 那样本库就救不了 kmod，必须当场失败，别把一个「看着成功」的固件发出去。
-if [ "$_ak_c3" -lt 100 ]; then
+if [ -d packages/official ] && [ "$_ak_c3" -lt 100 ]; then
     echo "::error::来源 C3 只收到 $_ak_c3 个 kmod（预期 1000+）——检查 packages/official/ 是否就位"
     ls packages/official 2>/dev/null | head -n 5 || echo "packages/official 不存在"
     exit 1
@@ -1469,7 +1469,7 @@ if [ -n "$_AK_BIN" ] && [ -n "$_AK_IDX" ] && [ -d "$_IB_PKGS" ]; then
         exit 1
     fi
     # kmod 一个都不能少：少了就是 make image 装内核模块时缺包，且错在装机阶段才暴露
-    if [ "$_ib_k" -lt 1100 ]; then
+    if [ -d "$_IB_PKGS/official" ] && [ "$_ib_k" -lt 1100 ]; then
         echo "::error::official/ 里只有 $_ib_k 个 kmod（预期 1199），内核模块库不完整"
         exit 1
     fi
