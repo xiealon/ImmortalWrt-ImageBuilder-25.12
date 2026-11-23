@@ -1464,6 +1464,34 @@ else
     echo "::warning::[ib-pkgs] 跳过：apk 工具不可用或 packages/ 不存在"
 fi
 
+# ---- 【2026-11-23 用户定】全量 kmod 在 action 阶段直接预装进固件 ----
+# 本地库 official/ 里是自建内核配套的 1199 个 kmod，过去只当「被删了能装回来」的备份，
+# 出厂 rootfs 里一个都不在。用户要求装进固件：刷完 lsmod 就有，配硬件/加功能不缺模块。
+# 名字从文件名剥版本：kmod-rtw88-8822c-6.12.103-r1.apk → kmod-rtw88-8822c
+# 不能按「最后一个连字符」截：kmod-8139cp / kmod-nls-iso8859-1 / kmod-rtw88-8822c
+# 的包名自带连字符与数字（2026-11-17 同名校验就栽在这上面，删过 44 个真 kmod）。
+# 内核版本一定带点（6.12.103），所以只认 `-<数字.数字>-r<数字>` 这一种尾巴。
+_ak_km_all=""
+if [ -n "$_IB_PKGS" ] && [ -d "$_IB_PKGS/official" ]; then
+    _ak_km_all=$(for _f in "$_IB_PKGS"/official/kmod-*.apk; do
+        [ -f "$_f" ] || continue
+        _n="${_f##*/}"
+        _n="${_n%.apk}"
+        printf '%s\n' "$_n" | sed -E 's/-[0-9]+(\.[0-9]+)+-r[0-9]+$//'
+    done | sort -u | tr '\n' ' ')
+    _ak_km_n=$(echo $_ak_km_all | wc -w)
+    if [ "$_ak_km_n" -lt 1100 ]; then
+        echo "::error::全量 kmod 名单只解出 $_ak_km_n 个（预期 1199），文件名规则可能变了"
+        ls "$_IB_PKGS"/official/kmod-*.apk 2>/dev/null | head -n 3
+        exit 1
+    fi
+    PACKAGES="$PACKAGES $_ak_km_all"
+    echo "==> [kmod-all] 已把 $_ak_km_n 个 kmod 追加进 PACKAGES（来自 official/ 全量）"
+    echo "==> [kmod-all] 抽样：$(echo $_ak_km_all | tr ' ' '\n' | head -n 5 | tr '\n' ' ')"
+else
+    echo "::warning::[kmod-all] 找不到 $_IB_PKGS/official，跳过全量 kmod 预装"
+fi
+
 # --- manifest.txt：pkg-cache-restore.sh --all 的比对基准 ---
 # apk 文件名是 <包名>-<版本>.apk，版本一定以数字开头，所以从「-数字」处截断。
 # 不能按最后一段截：lxc-auto-6.0.5-r1.apk 的包名自己带连字符。
@@ -1519,12 +1547,42 @@ fi
 ls "$_AK_DIR" | head -n 20
 
 # ---- 唯一一遍：此时 files/ 里的包库已完整，一次合进 rootfs ----
-make image PROFILE="generic" PACKAGES="$PACKAGES" FILES="/home/build/immortalwrt/files" ROOTFS_PARTSIZE=$PROFILE
-
-if [ $? -ne 0 ]; then
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Build failed (2nd pass: apk-cache)!"
-    exit 1
-fi
+# 【2026-11-23】一次装 1300+ 个包（含 1199 个 kmod）。个别 kmod 若因索引/依赖问题
+# 装不上，直接失败等于白跑十几分钟。这里带「剔掉报错包再试」：从日志里捞出装了却
+# 取不到的包名，去掉后重试，最多 3 轮；捞不到包名（真错误，不是包问题）立刻中止。
+_ak_mk_round=0
+while :; do
+    make image PROFILE="generic" PACKAGES="$PACKAGES" FILES="/home/build/immortalwrt/files" ROOTFS_PARTSIZE=$PROFILE 2>&1 | tee /tmp/imm25-mk.log
+    _ak_mk_rc=${PIPESTATUS[0]}
+    [ "$_ak_mk_rc" = "0" ] && break
+    _ak_mk_round=$((_ak_mk_round + 1))
+    echo "==> [kmod-all] make image 第 $_ak_mk_round 次失败（rc=$_ak_mk_rc），尝试剔包重试"
+    if [ "$_ak_mk_round" -gt 3 ]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Build failed (2nd pass: apk-cache, 剔包 3 轮仍失败)!"
+        tail -n 40 /tmp/imm25-mk.log
+        exit 1
+    fi
+    if ! grep -qE 'not found|unable to select|required by' /tmp/imm25-mk.log; then
+        echo "==> [kmod-all] 日志里没有「取不到包」类错误，是别的问题，不再重试"
+        tail -n 40 /tmp/imm25-mk.log
+        exit 1
+    fi
+    _ak_mk_bad=$(grep -oE 'kmod-[A-Za-z0-9_.-]+-[0-9]+(\.[0-9]+)+-r[0-9]+' /tmp/imm25-mk.log \
+        | sed -E 's/-[0-9]+(\.[0-9]+)+-r[0-9]+$//' | sort -u)
+    _ak_mk_drop=""
+    for _b in $_ak_mk_bad; do
+        case " $PACKAGES " in *" $_b "*) _ak_mk_drop="$_ak_mk_drop $_b" ;; esac
+    done
+    if [ -z "$_ak_mk_drop" ]; then
+        echo "==> [kmod-all] 报错的包里没有一个在 PACKAGES 里，是别的问题，不再重试"
+        tail -n 40 /tmp/imm25-mk.log
+        exit 1
+    fi
+    for _b in $_ak_mk_drop; do
+        PACKAGES=$(echo $PACKAGES | tr ' ' '\n' | grep -vxF "$_b" | tr '\n' ' ')
+        echo "==> [kmod-all] 从 PACKAGES 剔除 $_b"
+    done
+done
 
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Build completed successfully."
 
