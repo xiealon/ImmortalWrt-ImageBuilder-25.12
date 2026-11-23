@@ -1414,6 +1414,33 @@ if [ -n "$_AK_BIN" ] && [ -n "$_AK_IDX" ] && [ -d "$_IB_PKGS" ]; then
     # 为什么必须放在这一步而不是更早：上面「来源 A」的 packages/*.apk 通配会把根层
     # apk 全部拷进 /root/apk-cache 打进固件。1,384 个包会凭空多几百 MB。
     # 这里来源 A 早已跑完，建链接它看不见。
+    # ---- 【2026-11-23】同名 kmod 去重：只留与内核匹配的那份 ----
+    # IB 自带的平铺 kmod 是上游内核（71cc20e3）编的，official/ 是自建 honk 内核
+    # （26ed6bc1）编的。同一个包名同版本两份一起进索引，apk 挑哪份不确定。
+    # run #166 就挑中了 71cc 那份：
+    #   ERROR: unable to select packages:
+    #   kernel-6.12.103~26ed6bc1...-r1:
+    #     breaks: kmod-ip6-vti-6.12.103-r1[kernel=6.12.103~71cc20e3...-r1]
+    #     satisfies: world[kernel=6.12.103~26ed6bc1...-r1]
+    # 所以：official/ 里已有的同名平铺 kmod 先删掉，根层只留 official 的符号链接。
+    # 范围只限 kmod —— 只有内核模块带 kernel=hash 依赖，删别的会误伤。
+    _ak_dup=0
+    for _f in "$_IB_PKGS"/kmod-*.apk; do
+        [ -f "$_f" ] || continue
+        [ -L "$_f" ] && continue
+        _db="${_f##*/}"
+        _db="${_db%.apk}"
+        _db=$(printf '%s\n' "$_db" | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//')
+        _dc=0
+        for _c in "$_IB_PKGS/official/$_db"-*.apk; do
+            [ -e "$_c" ] && { _dc=1; break; }
+        done
+        if [ "$_dc" = 1 ]; then
+            rm -f "$_f"
+            _ak_dup=$((_ak_dup + 1))
+        fi
+    done
+    echo "==> [kmod-all] 删掉与 official/ 同名的旧 kmod（上游内核版）$_ak_dup 个"
     _ib_ln_n=0
     for _f in "$_IB_PKGS"/official/*.apk; do
         [ -f "$_f" ] || continue
