@@ -1140,7 +1140,46 @@ for _p in $PACKAGES; do
     done
     [ "$_hit" = 1 ] || _ak_c3m=$((_ak_c3m + 1))
 done
+# 应用要用、但没写进 PACKAGES 的 kmod（靠依赖自动拉装，所以要单独收）
+#   honk / daed 的 eBPF 与队列：kmod-nft-queue、kmod-nfnetlink-queue
+#   tproxy 家族：kmod-nf-tproxy、kmod-nft-tproxy、kmod-nft-socket
+#   sing-box / ssr-plus 常见依赖：kmod-tun、kmod-inet-diag、kmod-udptunnel4/6
+for _p in kmod-nft-queue kmod-nfnetlink-queue kmod-nf-conntrack kmod-nft-core \
+          kmod-nf-tproxy kmod-nft-tproxy kmod-nft-socket kmod-nft-nat \
+          kmod-tun kmod-inet-diag kmod-netlink-diag kmod-udptunnel4 kmod-udptunnel6 \
+          kmod-lib-crc32c kmod-ipt-core kmod-nf-nathelper; do
+    for _f in packages/"$_p"-[0-9]*.apk; do
+        [ -f "$_f" ] || continue
+        _n="${_f##*/}"
+        [ -e "$_AK_DIR/$_n" ] || { cp -f "$_f" "$_AK_DIR"/ && _ak_c3o=$((_ak_c3o + 1)); }
+        break
+    done
+done
 echo "==> [apk-cache] 来源 C3'（固件自用官方 kmod）：收 $_ak_c3o 个 apk，官方包里缺 $_ak_c3m 个"
+
+# ---- 覆盖自检：恢复清单里点名的应用，本地库里有没有 apk ----
+# 判据只看「库里有不有这份 apk」，与装没装无关；缺了就是恢复不了，必须让人看见。
+_ak_chk_miss=""
+_ak_chk_n=0
+for _p in xray-core shadowsocksr-libev-ssr-local shadowsocksr-libev-ssr-redir \
+          luci-app-ssr-plus luci-app-openclash luci-app-passwall luci-app-passwall2 \
+          daed daed-geoip daed-geosite honk sing-box mosdns smartdns \
+          acme-acmesh acme-common ddns-go npc cloudflared tailscale \
+          frpc frps aria2 ariang ksmbd-server nfs-kernel-server p910nd rpcd-mod-rpcsys; do
+    _hit=0
+    for _f in "$_AK_DIR/$_p"-[0-9]*.apk; do
+        [ -f "$_f" ] && { _hit=1; break; }
+    done
+    if [ "$_hit" = 1 ]; then
+        _ak_chk_n=$((_ak_chk_n + 1))
+    else
+        _ak_chk_miss="$_ak_chk_miss $_p"
+    fi
+done
+echo "==> [apk-cache] 覆盖自检：关键应用 $_ak_chk_n 个在库，缺 $(echo $_ak_chk_miss | wc -w) 个"
+if [ -n "$_ak_chk_miss" ]; then
+    echo "::warning::[apk-cache] 本地库缺这些应用的 apk（恢复不了）：$_ak_chk_miss"
+fi
 for _ak_w4 in luci-app-partexp luci-app-taskplan; do
     ls "$_AK_DIR/$_ak_w4"-[0-9]*.apk >/dev/null 2>&1 \
         || echo "::warning::库里仍缺 $_ak_w4（开机补充组装不回它）"
