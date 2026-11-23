@@ -1584,7 +1584,7 @@ while :; do
         tail -n 40 /tmp/imm25-mk.log
         exit 1
     fi
-    if ! grep -qE 'not found|unable to select|required by|not a valid world dependency|Unknown package' /tmp/imm25-mk.log; then
+    if ! grep -qE 'not found|unable to select|required by|not a valid world dependency|Unknown package|conflict' /tmp/imm25-mk.log; then
         echo "==> [kmod-all] 日志里没有「包名/取不到包」类错误，是别的问题，不再重试"
         tail -n 40 /tmp/imm25-mk.log
         exit 1
@@ -1592,7 +1592,7 @@ while :; do
     # ① 带引号被点名的包（is not a valid world dependency / Unknown package）
     # ② 日志里出现的 kmod-<名字>-<版本> 长名
     # 只从「报错行」里捞，避免把日志里正常打印的包名当坏包剔掉。
-    grep -E 'not a valid world dependency|Unknown package|not found|unable to select' /tmp/imm25-mk.log > /tmp/imm25-mk.err
+    grep -E 'not a valid world dependency|Unknown package|not found|unable to select|conflict' /tmp/imm25-mk.log > /tmp/imm25-mk.err
     _ak_mk_bad=$( { grep -oE "'[A-Za-z0-9_.~+-]+'" /tmp/imm25-mk.err | tr -d "'"
                     grep -oE 'kmod-[A-Za-z0-9_.-]+-[0-9]+(\.[0-9]+)+' /tmp/imm25-mk.err ; } \
         | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//' | grep -E '^[A-Za-z]' | sort -u)
