@@ -1682,6 +1682,30 @@ PY
     done
 }
 
+# 【2026-11-23 用户定】这三个 kmod 官方源里没有（x86 传感器/风扇用），直接去掉，
+# 不再让它每轮失败一次再被动剔除。
+for _ak_gone in kmod-acpi-call kmod-gpio-pwm kmod-hwmon-pwmfan; do
+    PACKAGES=$(echo $PACKAGES | tr ' ' '\n' | grep -vxF "$_ak_gone" | tr '\n' ' ')
+    if [ -f profiles.json ]; then
+        python3 - "$_ak_gone" <<'PY'
+import json, sys
+name = sys.argv[1]
+try:
+    d = json.load(open("profiles.json"))
+except Exception:
+    sys.exit(0)
+ch = False
+for prof in (d.get("profiles") or {}).values():
+    pk = prof.get("packages")
+    if isinstance(pk, list) and name in pk:
+        prof["packages"] = [x for x in pk if x != name]
+        ch = True
+if ch:
+    json.dump(d, open("profiles.json", "w"), ensure_ascii=False, indent=1)
+PY
+    fi
+done
+echo "==> [mk] 已提前移除官方源缺的 3 个 kmod：kmod-acpi-call kmod-gpio-pwm kmod-hwmon-pwmfan"
 echo "==> [backup-all] 第 1 遍 make image（拿真实安装清单）"
 _ak_mk_image
 
