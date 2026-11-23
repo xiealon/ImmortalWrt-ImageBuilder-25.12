@@ -11,8 +11,8 @@
 [ -f /etc/config/dhcp ] || exit 0
 uci -q get dhcp.lan >/dev/null 2>&1 || exit 0
 
-# 标记：bootstrap 的 dhcp_ignore 看到它就保持 disabled（删掉此文件即恢复发 RA）
-touch /etc/config/ipv6_off 2>/dev/null || true
+# 【2026-11-23 用户定】只此一次：把 LAN 的 RA/DHCPv6/NDP 关掉，之后脚本自删；
+# step.sh 已经完全不碰这几项，所以本次设置不会被开机流程覆盖。
 uci set dhcp.lan.ra='disabled'
 uci set dhcp.lan.dhcpv6='disabled'
 uci set dhcp.lan.ndp='disabled'
