@@ -1568,10 +1568,10 @@ fi
 ls "$_AK_DIR" | head -n 20
 
 # ---- 唯一一遍：此时 files/ 里的包库已完整，一次合进 rootfs ----
-# 【2026-11-23】一次装 1300+ 个包（含全量 kmod）。个别 kmod 若索引/命名有问题，
-# 直接失败等于白跑十几分钟。这里带「剔掉报错包再试」：从日志捞包名（三种错都认：
-# not found / unable to select / not a valid world dependency / Unknown package），
-# 去掉后重试，最多 3 轮；捞不到包名（真错误）立刻中止。
+# 【2026-11-23】一次装 1300+ 个包（含全量 kmod）。个别包若与内核 hash 对不上，
+# apk 会以 `unable to select packages` 报错退出。这里带「剔掉报错包再试」：
+# 从 `ERROR:` 到 `make[2]: ***` 这一段里捞包名（这段才是候选清单，头行没有名字），
+# 去掉后重试，最多 5 轮；捞不到新包名（真错误）立刻中止。
 _ak_mk_round=0
 while :; do
     make image PROFILE="generic" PACKAGES="$PACKAGES" FILES="/home/build/immortalwrt/files" ROOTFS_PARTSIZE=$PROFILE 2>&1 | tee /tmp/imm25-mk.log
@@ -1579,30 +1579,29 @@ while :; do
     [ "$_ak_mk_rc" = "0" ] && break
     _ak_mk_round=$((_ak_mk_round + 1))
     echo "==> [kmod-all] make image 第 $_ak_mk_round 次失败（rc=$_ak_mk_rc），尝试剔包重试"
-    if [ "$_ak_mk_round" -gt 3 ]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Build failed (2nd pass: apk-cache, 剔包 3 轮仍失败)!"
+    if [ "$_ak_mk_round" -gt 5 ]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Build failed (2nd pass: apk-cache, 剔包 5 轮仍失败)!"
         tail -n 40 /tmp/imm25-mk.log
         exit 1
     fi
-    if ! grep -qE 'not found|unable to select|required by|not a valid world dependency|Unknown package|conflict' /tmp/imm25-mk.log; then
-        echo "==> [kmod-all] 日志里没有「包名/取不到包」类错误，是别的问题，不再重试"
+    if ! grep -qE 'unable to select|not found|required by|not a valid world dependency|Unknown package|conflict' /tmp/imm25-mk.log; then
+        echo "==> [kmod-all] 日志里没有「包名/依赖」类错误，是别的问题，不再重试"
         tail -n 40 /tmp/imm25-mk.log
         exit 1
     fi
-    # ① 带引号被点名的包（is not a valid world dependency / Unknown package）
-    # ② 日志里出现的 kmod-<名字>-<版本> 长名
-    # 只从「报错行」里捞，避免把日志里正常打印的包名当坏包剔掉。
-    grep -E 'not a valid world dependency|Unknown package|not found|unable to select|conflict' /tmp/imm25-mk.log > /tmp/imm25-mk.err
-    _ak_mk_bad=$( { grep -oE "'[A-Za-z0-9_.~+-]+'" /tmp/imm25-mk.err | tr -d "'"
-                    grep -oE 'kmod-[A-Za-z0-9_.-]+-[0-9]+(\.[0-9]+)+' /tmp/imm25-mk.err ; } \
-        | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//' | grep -E '^[A-Za-z]' | sort -u)
+    # 只取报错段：从第一个 ERROR: 到 make[2]: ***，避免把 Packages 清单里的名字全剔掉
+    awk '/^ERROR:/{f=1} f{print; if (/^make\[2\]: \*\*\*/) exit}' /tmp/imm25-mk.log > /tmp/imm25-mk.err
+    _ak_mk_bad=$( { grep -oE "'[A-Za-z0-9_.~+-]+'" /tmp/imm25-mk.err
+                    grep -oE '[A-Za-z0-9_.+-]+-[0-9]+\.[0-9]+\.[0-9]+' /tmp/imm25-mk.err ; } \
+        | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//' | grep -E '^[a-z]' | sort -u)
     _ak_mk_drop=""
     for _b in $_ak_mk_bad; do
         case " $PACKAGES " in *" $_b "*) _ak_mk_drop="$_ak_mk_drop $_b" ;; esac
     done
     if [ -z "$_ak_mk_drop" ]; then
-        echo "==> [kmod-all] 报错的包里没有一个在 PACKAGES 里，是别的问题，不再重试"
-        tail -n 40 /tmp/imm25-mk.log
+        echo "==> [kmod-all] 报错段里的包名都不在 PACKAGES 里，是别的问题，不再重试"
+        head -n 20 /tmp/imm25-mk.err
+        tail -n 20 /tmp/imm25-mk.log
         exit 1
     fi
     for _b in $_ak_mk_drop; do
