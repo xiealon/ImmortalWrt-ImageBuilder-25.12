@@ -708,7 +708,8 @@ build_lan_static() {
     # 为什么是 delete 而不是 set '0'：uci 里 disabled 只要不是 "1" 就等同启用，
     # 删掉能让配置回到最干净的状态，和固件初始配置一致。
     run uci -q delete network.lan.disabled
-    run uci -q delete network.lan6 2>/dev/null
+    # 【2026-11-23 用户定】本脚本对 lan6 不做任何动作（不建、不删、不挂 zone）——
+    # 以后自己加 lan6 时不会被这里的任何一步动到。
     run uci -q set network.lan.proto='static'
     run uci -q set network.lan.device='br-lan'
     run uci -q set network.lan.ipaddr="$1"
