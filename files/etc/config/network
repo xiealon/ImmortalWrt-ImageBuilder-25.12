@@ -6,7 +6,6 @@ config interface 'loopback'
 	option netmask '255.0.0.0'
 
 config globals 'globals'
-	option ula_prefix 'fd80:e247:db6e::/48'
 	option packet_steering '1'
 
 config interface 'lan'
@@ -16,18 +15,6 @@ config interface 'lan'
 	option netmask '255.255.255.0'
 	option gateway '10.0.0.10'
 	list dns '10.0.0.10'
-	option delegate '0'
-	option ip6assign '64'
-	option ip6ifaceid 'eui64'
-
-config interface 'lan6'
-	option proto 'dhcpv6'
-	option device '@lan'
-	option reqaddress 'try'
-	option reqprefix 'auto'
-	option norelease '1'
-	option sendclientid 'auto'
-	option peerdns '0'
 
 config interface 'vpn0'
 	option proto 'none'
@@ -57,4 +44,3 @@ config interface 'docker'
 config device
 	option type 'bridge'
 	option name 'docker0'
-
