@@ -1430,27 +1430,6 @@ if [ -n "$_AK_BIN" ] && [ -n "$_AK_IDX" ] && [ -d "$_IB_PKGS" ]; then
     # 为什么必须放在这一步而不是更早：上面「来源 A」的 packages/*.apk 通配会把根层
     # apk 全部拷进 /root/apk-cache 打进固件。1,384 个包会凭空多几百 MB。
     # 这里来源 A 早已跑完，建链接它看不见。
-    # ---- 【2026-11-23】同名 kmod 去重：只留与内核匹配的那份 ----
-    # IB 自带的平铺 kmod 是上游内核（71cc20e3）编的，official/ 是自建 honk 内核
-    # （26ed6bc1）编的；同名同版本两份一起进索引，apk 挑哪份不确定（run #166 挑中了 71cc，
-    # 于是 kernel-26ed 被判 breaks）。所以 official/ 里已有的同名平铺 kmod 先删掉。
-    _ak_dup=0
-    for _f in "$_IB_PKGS"/kmod-*.apk; do
-        [ -f "$_f" ] || continue
-        [ -L "$_f" ] && continue
-        _db="${_f##*/}"
-        _db="${_db%.apk}"
-        _db=$(printf '%s\n' "$_db" | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//')
-        _dc=0
-        for _c in "$_IB_PKGS/official/$_db"-*.apk; do
-            [ -e "$_c" ] && { _dc=1; break; }
-        done
-        if [ "$_dc" = 1 ]; then
-            rm -f "$_f"
-            _ak_dup=$((_ak_dup + 1))
-        fi
-    done
-    echo "==> [kmod-all] 删掉与 official/ 同名的旧 kmod（上游内核版）$_ak_dup 个"
     _ib_ln_n=0
     for _f in "$_IB_PKGS"/official/*.apk; do
         [ -f "$_f" ] || continue
@@ -1500,86 +1479,6 @@ if [ -n "$_AK_BIN" ] && [ -n "$_AK_IDX" ] && [ -d "$_IB_PKGS" ]; then
 else
     echo "::warning::[ib-pkgs] 跳过：apk 工具不可用或 packages/ 不存在"
 fi
-
-# ---- 【2026-11-23 用户定】全量 kmod 在 action 阶段直接预装进固件 ----
-# 来源：official/ 全量（自建内核配套）。出厂 rootfs 里原本一个 kmod 都不带，刷完 lsmod 是空的；
-# 用户要求直接装进固件，配硬件/加功能不缺模块。
-#
-# 剥版本只认内核 ABI 前缀 `-<数字.数字.数字>`，不认 `-rN` 尾巴。
-# 反例（run #165）：kmod-aic8800-btusb-6.12.103.2026.03.10~89f865b8-r4.apk
-#   → 按 `-rN$` 剥不掉，整串文件名被当包名：is not a valid world dependency。
-# 剥完还要逐个核「根层真有 <名字>-*.apk」，核不上的宁可少装也不进 PACKAGES。
-_ak_km_all=""
-_ak_km_n=0
-_ak_km_bad=0
-if [ -n "$_IB_PKGS" ] && [ -d "$_IB_PKGS/official" ]; then
-    _ak_km_src="$_IB_PKGS/official"
-    _ak_km_raw=$(for _f in "$_ak_km_src"/kmod-*.apk; do
-        [ -e "$_f" ] || continue
-        _n="${_f##*/}"
-        _n="${_n%.apk}"
-        printf '%s\n' "$_n" | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//'
-    done | sort -u)
-    for _nm in $_ak_km_raw; do
-        [ -n "$_nm" ] || continue
-        case " $_ak_km_all " in *" $_nm "*) continue ;; esac
-        _hit=0
-        for _c in "$_IB_PKGS/$_nm"-*.apk; do
-            [ -e "$_c" ] && { _hit=1; break; }
-        done
-        if [ "$_hit" = 1 ]; then
-            _ak_km_all="$_ak_km_all $_nm"
-            _ak_km_n=$((_ak_km_n + 1))
-        else
-            _ak_km_bad=$((_ak_km_bad + 1))
-            [ "$_ak_km_bad" -le 5 ] && echo "==> [kmod-all] 跳过核不上的名字：$_nm"
-        fi
-    done
-    if [ "$_ak_km_n" -ge 1100 ]; then
-        PACKAGES="$PACKAGES $_ak_km_all"
-        echo "==> [kmod-all] 已把 $_ak_km_n 个 kmod 追加进 PACKAGES（official/ 全量（自建内核配套）；核不上跳过 $_ak_km_bad 个）"
-        echo "==> [kmod-all] 抽样：$(echo $_ak_km_all | tr ' ' '\n' | awk 'NR<=5{printf "%s ",$0}')"
-    else
-        echo "::warning::[kmod-all] 只解出 $_ak_km_n 个 kmod（阈值 1100），不做全量预装"
-    fi
-else
-    echo "::warning::[kmod-all] 找不到 $_IB_PKGS/official，跳过全量 kmod 预装"
-fi
-
-# ---- 【2026-11-23 用户定】来源 C5：官方 kmod 只收「需要的」进本地库 ----
-# 为什么不收全量：官方 IB 的 kmod 有 1,199 个，全收镜像多几十 MB，
-# 而实际会用到的只有「固件装着的 + 受保护应用依赖的」这一小撮。
-# 名单 = PACKAGES 里点名的 kmod ∪ 应用依赖兜底 ∪ profiles.json 里 generic 档案自带的 kmod
-# 落点仍是 $_AK_DIR（/rom/root/apk-cache），开机 --repair 由 _pa_missing_kmods 自动接管：
-#   期望 = 出厂库 kmod ∩ 本地库真有 apk 的   ← C5 让这个交集不再为空
-_ak_c5_want=""
-for _p in $PACKAGES; do
-    case "$_p" in kmod-*) _ak_c5_want="$_ak_c5_want $_p" ;; esac
-done
-# 受保护应用的 kmod 依赖兜底（honk / daed / openclash / zram）
-_ak_c5_want="$_ak_c5_want kmod-sched-core kmod-sched-bpf kmod-veth kmod-nft-queue \
-kmod-xdp-sockets-diag kmod-dummy kmod-zram kmod-tun kmod-inet-diag kmod-netlink-diag \
-kmod-nft-tproxy kmod-nft-socket kmod-nfnetlink-queue"
-# 出厂档案自带的 kmod（这些是镜像里真正装着的，删了最该能装回来）
-if [ -f profiles.json ]; then
-    _ak_c5_prof=$(jq -r '.. | .packages? // empty | .[]?' profiles.json 2>/dev/null | grep '^kmod-' | sort -u)
-    _ak_c5_want="$_ak_c5_want $_ak_c5_prof"
-fi
-_ak_c5=0
-_ak_c5_miss=""
-for _n in $(echo $_ak_c5_want | tr ' ' '\n' | sort -u); do
-    [ -n "$_n" ] || continue
-    _hit=0
-    for _f in packages/"$_n"-[0-9]*.apk; do
-        [ -f "$_f" ] || continue
-        cp -f "$_f" "$_AK_DIR"/ && _ak_c5=$((_ak_c5 + 1))
-        _hit=1
-        break
-    done
-    [ "$_hit" = 1 ] || _ak_c5_miss="$_ak_c5_miss $_n"
-done
-echo "==> [apk-cache] 来源 C5（按需 kmod）：$_ak_c5 个 apk 已入库"
-[ -n "$_ak_c5_miss" ] && echo "==> [apk-cache] C5 库里找不到（跳过，不影响构建）：$_ak_c5_miss"
 
 # --- manifest.txt：pkg-cache-restore.sh --all 的比对基准 ---
 # apk 文件名是 <包名>-<版本>.apk，版本一定以数字开头，所以从「-数字」处截断。
@@ -1664,33 +1563,10 @@ done
 echo "==> [kmod-diag] 结束"
 
 # ---- 唯一一遍：此时 files/ 里的包库已完整，一次合进 rootfs ----
-# 【2026-11-23 用户定】官方 kmod 一律不要：直接把官方 packages feed 从 repositories 里
-# 摘掉，让它们根本不参与求解。
-#   为什么：上游 25.12.2 的 kmod 是内核 71cc20e3 编的，与自建内核 26ed6bc1 同名同版本
-#   （都是 6.12.103-r1），apk 会挑中上游那份 →
-#     ERROR: unable to select packages: kernel-26ed ... breaks: kmod-x[kernel=71cc]
-#   这类包装进我们内核也跑不起来（vermagic 不符）。
-# 不按名单剔包：整条 feed 去掉；万一这条 feed 还担着某个普通包，下面会把它点名出来。
-_ak_repo_bak=/tmp/repositories.orig
-if [ -f repositories ]; then
-    cp -f repositories "$_ak_repo_bak"
-    # ① 官方 kmods 目录（若存在）② 官方 packages feed（71cc kmod 就在这里）—— 两条一起删
-    awk '!/\/kmods\// && !/\/packages\/x86_64\/packages\/packages\.adb$/' "$_ak_repo_bak" > /tmp/repositories.new
-    if [ -s /tmp/repositories.new ]; then
-        cat /tmp/repositories.new > repositories
-        echo "==> [kmod-all] repositories 已去掉官方 packages feed（71cc kmod 来源），剩 $(grep -c . repositories) 条："
-        sed 's|^|      |' repositories
-    else
-        echo "::warning::[kmod-all] 去掉官方 packages feed 后一条不剩，保持原样"
-    fi
-fi
+make image PROFILE="generic" PACKAGES="$PACKAGES" FILES="/home/build/immortalwrt/files" ROOTFS_PARTSIZE=$PROFILE
 
-make image PROFILE="generic" PACKAGES="$PACKAGES" FILES="/home/build/immortalwrt/files" ROOTFS_PARTSIZE=$PROFILE 2>&1 | tee /tmp/imm25-mk.log
-_ak_mk_rc=${PIPESTATUS[0]}
-if [ "$_ak_mk_rc" != "0" ]; then
+if [ $? -ne 0 ]; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Build failed (2nd pass: apk-cache)!"
-    echo "==> [kmod-all] 失败原因（ERROR: 到 make[2]: *** 之间）："
-    awk '/^ERROR:/{f=1} f{if (/^make\[2\]: \*\*\*/) exit; print}' /tmp/imm25-mk.log | head -n 40
     exit 1
 fi
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Build completed successfully."
