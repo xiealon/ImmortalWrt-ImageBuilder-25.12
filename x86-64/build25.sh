@@ -1120,21 +1120,27 @@ for _ak_pat in luci-app-partexp-*.apk luci-app-taskplan-*.apk \
 done
 echo "==> [apk-cache] 来源 C4（partexp/taskplan）：补拷 $_ak_c4 个 apk"
 
-# ---- 【2026-11-23 用户定】来源 C3'：官方 kmod 整批收进本地库 ----
-# 改走官方 ImageBuilder 后，packages/ 里的 kmod 与内核（71cc20e3）天生配套，
-# 可以整批拷进 /rom/root/apk-cache：被 apk del 掉之后，开机 --repair 能离线装回来
-# （_pa_missing_kmods 用文件名对照），既不用联网，也不会像自建那套装错 kernel hash。
+# ---- 【2026-11-23 用户定】来源 C3'：只把「固件自己要用到的」官方 kmod 收进本地库 ----
+# 官方 kmod 与内核（71cc20e3）配套，缺了能现装；所以本地库只留 PACKAGES 里点名的那几个，
+# 不做全量（全量 1,200 个纯属占地）。这些收进来是为了：被 apk del 掉后开机 --repair
+# 能从本地库离线装回（_pa_missing_kmods 按文件名对照）。
+# 依赖不用一起收：它们的依赖（kmod-sched-core 之类）本来就是固件已装的包，
+# apk 判定「已满足」，不会去库里找。
 _ak_c3o=0
-for _f in packages/kmod-*.apk; do
-    [ -f "$_f" ] || continue
-    _n="${_f##*/}"
-    [ -e "$_AK_DIR/$_n" ] && continue
-    cp -f "$_f" "$_AK_DIR"/ && _ak_c3o=$((_ak_c3o + 1))
+_ak_c3m=0
+for _p in $PACKAGES; do
+    case "$_p" in kmod-*) ;; *) continue ;; esac
+    _hit=0
+    for _f in packages/"$_p"-[0-9]*.apk; do
+        [ -f "$_f" ] || continue
+        _n="${_f##*/}"
+        [ -e "$_AK_DIR/$_n" ] || { cp -f "$_f" "$_AK_DIR"/ && _ak_c3o=$((_ak_c3o + 1)); }
+        _hit=1
+        break
+    done
+    [ "$_hit" = 1 ] || _ak_c3m=$((_ak_c3m + 1))
 done
-echo "==> [apk-cache] 来源 C3'（官方 kmod）：收 $_ak_c3o 个 apk"
-if [ "$_ak_c3o" -lt 100 ]; then
-    echo "::warning::[apk-cache] 来源 C3' 只收到 $_ak_c3o 个官方 kmod（预期 1000+），本地库缺内核模块"
-fi
+echo "==> [apk-cache] 来源 C3'（固件自用官方 kmod）：收 $_ak_c3o 个 apk，官方包里缺 $_ak_c3m 个"
 for _ak_w4 in luci-app-partexp luci-app-taskplan; do
     ls "$_AK_DIR/$_ak_w4"-[0-9]*.apk >/dev/null 2>&1 \
         || echo "::warning::库里仍缺 $_ak_w4（开机补充组装不回它）"
