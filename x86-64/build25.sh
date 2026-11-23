@@ -1120,42 +1120,54 @@ for _ak_pat in luci-app-partexp-*.apk luci-app-taskplan-*.apk \
 done
 echo "==> [apk-cache] 来源 C4（partexp/taskplan）：补拷 $_ak_c4 个 apk"
 
-# ---- 【2026-11-23 用户定】来源 C3'：只把「固件自己要用到的」官方 kmod 收进本地库 ----
-# 官方 kmod 与内核（71cc20e3）配套，缺了能现装；所以本地库只留 PACKAGES 里点名的那几个，
-# 不做全量（全量 1,200 个纯属占地）。这些收进来是为了：被 apk del 掉后开机 --repair
-# 能从本地库离线装回（_pa_missing_kmods 按文件名对照）。
-# 依赖不用一起收：它们的依赖（kmod-sched-core 之类）本来就是固件已装的包，
-# apk 判定「已满足」，不会去库里找。
+# ---- 【2026-11-23 用户定】来源 C3'：需要的 kmod 从官方 kmods feed 下载进本地库 ----
+# 官方 ImageBuilder 的 packages/ 里没有 kmod（实测：拷 0 个），它们只在远程 kmods 源里：
+#   .../targets/x86/64/kmods/<内核版本>-1-<官方 hash>/<名字>-<版本>.apk
+# 该目录可直接列（HTTP 200 + autoindex），所以按名字取真实文件名再下载：
+#   · 固件 PACKAGES 里点名的 kmod
+#   · 应用靠依赖拉装、但没写进 PACKAGES 的（kmod-nft-queue / tproxy 家族 等）
+# 收进 /rom/root/apk-cache 后，被 apk del 掉就能离线装回（_pa_missing_kmods 按文件名对照）。
+# 注意：这是「需要的那些」，不是全量 1,200 个。
 _ak_c3o=0
 _ak_c3m=0
-for _p in $PACKAGES; do
-    case "$_p" in kmod-*) ;; *) continue ;; esac
-    _hit=0
-    for _f in packages/"$_p"-[0-9]*.apk; do
-        [ -f "$_f" ] || continue
-        _n="${_f##*/}"
-        [ -e "$_AK_DIR/$_n" ] || { cp -f "$_f" "$_AK_DIR"/ && _ak_c3o=$((_ak_c3o + 1)); }
-        _hit=1
-        break
-    done
-    [ "$_hit" = 1 ] || _ak_c3m=$((_ak_c3m + 1))
-done
-# 应用要用、但没写进 PACKAGES 的 kmod（靠依赖自动拉装，所以要单独收）
-#   honk / daed 的 eBPF 与队列：kmod-nft-queue、kmod-nfnetlink-queue
-#   tproxy 家族：kmod-nf-tproxy、kmod-nft-tproxy、kmod-nft-socket
-#   sing-box / ssr-plus 常见依赖：kmod-tun、kmod-inet-diag、kmod-udptunnel4/6
-for _p in kmod-nft-queue kmod-nfnetlink-queue kmod-nf-conntrack kmod-nft-core \
-          kmod-nf-tproxy kmod-nft-tproxy kmod-nft-socket kmod-nft-nat \
-          kmod-tun kmod-inet-diag kmod-netlink-diag kmod-udptunnel4 kmod-udptunnel6 \
-          kmod-lib-crc32c kmod-ipt-core kmod-nf-nathelper; do
-    for _f in packages/"$_p"-[0-9]*.apk; do
-        [ -f "$_f" ] || continue
-        _n="${_f##*/}"
-        [ -e "$_AK_DIR/$_n" ] || { cp -f "$_f" "$_AK_DIR"/ && _ak_c3o=$((_ak_c3o + 1)); }
-        break
-    done
-done
-echo "==> [apk-cache] 来源 C3'（固件自用官方 kmod）：收 $_ak_c3o 个 apk，官方包里缺 $_ak_c3m 个"
+_ak_kfeed=$(grep -E '/kmods/' repositories 2>/dev/null | head -n1)
+if [ -n "$_ak_kfeed" ]; then
+    _ak_kdir=${_ak_kfeed%/*}
+    _ak_klist=/tmp/km-feed.html
+    if curl -fsSL "$_ak_kdir/" -o "$_ak_klist" 2>/dev/null && [ -s "$_ak_klist" ]; then
+        _ak_knames=$( {
+            for _p in $PACKAGES; do
+                case "$_p" in kmod-*) printf '%s\n' "$_p" ;; esac
+            done
+            # 依赖型 kmod：honk/daed 的队列与 eBPF、tproxy 家族、ssr-plus/sing-box 常见件
+            printf '%s\n' kmod-nft-queue kmod-nfnetlink-queue kmod-nf-conntrack \
+                kmod-nft-core kmod-nf-tproxy kmod-nft-tproxy kmod-nft-socket kmod-nft-nat \
+                kmod-tun kmod-inet-diag kmod-netlink-diag kmod-udptunnel4 kmod-udptunnel6 \
+                kmod-lib-crc32c kmod-ipt-core kmod-nf-nathelper
+        } | sort -u )
+        for _p in $_ak_knames; do
+            _ak_fn=$(grep -oE "href=\"${_p}-[0-9][^\"]*\.apk\"" "$_ak_klist" | sed 's/^href="//; s/"$//' | head -n1)
+            if [ -z "$_ak_fn" ]; then
+                _ak_c3m=$((_ak_c3m + 1))
+                echo "==> [apk-cache] 官方 kmods 源里没有：$_p"
+                continue
+            fi
+            [ -e "$_AK_DIR/$_ak_fn" ] && continue
+            if curl -fsSL "$_ak_kdir/$_ak_fn" -o "$_AK_DIR/$_ak_fn" 2>/dev/null && [ -s "$_AK_DIR/$_ak_fn" ]; then
+                _ak_c3o=$((_ak_c3o + 1))
+            else
+                rm -f "$_AK_DIR/$_ak_fn"
+                _ak_c3m=$((_ak_c3m + 1))
+                echo "==> [apk-cache] 下载失败：$_ak_fn"
+            fi
+        done
+    else
+        echo "::warning::[apk-cache] 列不出官方 kmods 目录（$_ak_kdir），本地库不会有 kmod"
+    fi
+else
+    echo "::warning::[apk-cache] repositories 里没有 /kmods/ 源，本地库不会有 kmod"
+fi
+echo "==> [apk-cache] 来源 C3'（官方 kmods feed 下载）：收 $_ak_c3o 个 apk，缺 $_ak_c3m 个"
 
 # ---- 覆盖自检：恢复清单里点名的应用，本地库里有没有 apk ----
 # 判据只看「库里有不有这份 apk」，与装没装无关；缺了就是恢复不了，必须让人看见。
