@@ -1530,6 +1530,41 @@ else
     echo "::warning::[kmod-all] 找不到 $_IB_PKGS/official，跳过全量 kmod 预装"
 fi
 
+# ---- 【2026-11-23 用户定】来源 C5：官方 kmod 只收「需要的」进本地库 ----
+# 为什么不收全量：官方 IB 的 kmod 有 1,199 个，全收镜像多几十 MB，
+# 而实际会用到的只有「固件装着的 + 受保护应用依赖的」这一小撮。
+# 名单 = PACKAGES 里点名的 kmod ∪ 应用依赖兜底 ∪ profiles.json 里 generic 档案自带的 kmod
+# 落点仍是 $_AK_DIR（/rom/root/apk-cache），开机 --repair 由 _pa_missing_kmods 自动接管：
+#   期望 = 出厂库 kmod ∩ 本地库真有 apk 的   ← C5 让这个交集不再为空
+_ak_c5_want=""
+for _p in $PACKAGES; do
+    case "$_p" in kmod-*) _ak_c5_want="$_ak_c5_want $_p" ;; esac
+done
+# 受保护应用的 kmod 依赖兜底（honk / daed / openclash / zram）
+_ak_c5_want="$_ak_c5_want kmod-sched-core kmod-sched-bpf kmod-veth kmod-nft-queue \
+kmod-xdp-sockets-diag kmod-dummy kmod-zram kmod-tun kmod-inet-diag kmod-netlink-diag \
+kmod-nft-tproxy kmod-nft-socket kmod-nfnetlink-queue"
+# 出厂档案自带的 kmod（这些是镜像里真正装着的，删了最该能装回来）
+if [ -f profiles.json ]; then
+    _ak_c5_prof=$(jq -r '.. | .packages? // empty | .[]?' profiles.json 2>/dev/null | grep '^kmod-' | sort -u)
+    _ak_c5_want="$_ak_c5_want $_ak_c5_prof"
+fi
+_ak_c5=0
+_ak_c5_miss=""
+for _n in $(echo $_ak_c5_want | tr ' ' '\n' | sort -u); do
+    [ -n "$_n" ] || continue
+    _hit=0
+    for _f in packages/"$_n"-[0-9]*.apk; do
+        [ -f "$_f" ] || continue
+        cp -f "$_f" "$_AK_DIR"/ && _ak_c5=$((_ak_c5 + 1))
+        _hit=1
+        break
+    done
+    [ "$_hit" = 1 ] || _ak_c5_miss="$_ak_c5_miss $_n"
+done
+echo "==> [apk-cache] 来源 C5（按需 kmod）：$_ak_c5 个 apk 已入库"
+[ -n "$_ak_c5_miss" ] && echo "==> [apk-cache] C5 库里找不到（跳过，不影响构建）：$_ak_c5_miss"
+
 # --- manifest.txt：pkg-cache-restore.sh --all 的比对基准 ---
 # apk 文件名是 <包名>-<版本>.apk，版本一定以数字开头，所以从「-数字」处截断。
 # 不能按最后一段截：lxc-auto-6.0.5-r1.apk 的包名自己带连字符。
