@@ -1709,9 +1709,37 @@ echo "==> [mk] 已提前移除官方源缺的 3 个 kmod：kmod-acpi-call kmod-g
 echo "==> [backup-all] 第 1 遍 make image（拿真实安装清单）"
 _ak_mk_image
 
-_tgz=$(ls bin/targets/x86/64/*rootfs.tar.gz 2>/dev/null | head -n1)
-if [ -n "$_tgz" ]; then
-    tar -xzOf "$_tgz" lib/apk/db/installed 2>/dev/null | sed -n 's/^P://p' | sort -u > /tmp/installed.txt
+# 拿「真实安装清单」——IB 产物里不一定有 lib/apk/db/installed（apk3 是 installed.adb），
+# 所以按顺序试三种来源，任何一个拿到上千条包名就收工：
+#   ① bin/targets/x86/64/*.manifest（IB 自己生成的 name - version 清单，最稳）
+#   ② build_dir/target-*/root-x86 + apk info（用 IB 自带 apk 问已装库）
+#   ③ rootfs.tar.gz 里的 db（installed / installed.adb + adbdump）
+: > /tmp/installed.txt
+_man=$(ls bin/targets/x86/64/*.manifest 2>/dev/null | head -n1)
+if [ -n "$_man" ]; then
+    sed -n 's/^ *\([A-Za-z0-9][A-Za-z0-9_.+-]*\) .*/\1/p' "$_man" | sort -u > /tmp/installed.txt
+    echo "==> [backup-all] 清单来源：manifest（$(basename "$_man")）"
+fi
+if [ "$(grep -c . /tmp/installed.txt 2>/dev/null || echo 0)" -lt 100 ]; then
+    _root=$(ls -d build_dir/target-*/root-x86 2>/dev/null | head -n1)
+    if [ -n "$_root" ] && [ -n "$_AK_BIN" ]; then
+        "$_AK_BIN" --root "$_root" info 2>/dev/null \
+            | awk '{print $1}' | sed -E 's/-[0-9][^-]*-r[0-9]+$//' | sort -u > /tmp/installed.txt
+        echo "==> [backup-all] 清单来源：apk info（$_root）"
+    fi
+fi
+if [ "$(grep -c . /tmp/installed.txt 2>/dev/null || echo 0)" -lt 100 ]; then
+    _tgz=$(ls bin/targets/x86/64/*rootfs.tar.gz 2>/dev/null | head -n1)
+    if [ -n "$_tgz" ]; then
+        for _dbp in ./lib/apk/db/installed lib/apk/db/installed ./usr/lib/apk/db/installed; do
+            tar -xzOf "$_tgz" "$_dbp" 2>/dev/null | sed -n 's/^P://p' | sort -u > /tmp/installed.txt
+            [ "$(grep -c . /tmp/installed.txt 2>/dev/null || echo 0)" -ge 100 ] && break
+        done
+        echo "==> [backup-all] 清单来源：rootfs.tar.gz 内的 apk db"
+    fi
+fi
+
+if [ "$(grep -c . /tmp/installed.txt 2>/dev/null || echo 0)" -ge 100 ]; then
     _ak_inst_n=$(grep -c . /tmp/installed.txt 2>/dev/null) || _ak_inst_n=0
     ls "$_AK_DIR" 2>/dev/null | sed -n 's/\.apk$//p' \
         | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+.*$//; s/-[0-9]{8,}.*$//' | sort -u > /tmp/incache.txt
@@ -1750,7 +1778,7 @@ if [ -n "$_tgz" ]; then
     echo "==> [backup-all] 第 2 遍 make image（把补齐的包一起打进固件）"
     _ak_mk_image
 else
-    echo "::warning::[backup-all] 找不到 rootfs.tar.gz，跳过全量备份，只编一遍"
+    echo "::warning::[backup-all] 拿不到安装清单（manifest/apk info/tar 都失败），跳过全量备份"
 fi
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Build completed successfully."
 
