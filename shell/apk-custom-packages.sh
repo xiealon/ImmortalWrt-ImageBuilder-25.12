@@ -60,11 +60,10 @@ CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-3ginfo-lite-zh-cn"
 # 【2026-11-18】lucky 撤掉，换回专用工具：证书 acme / DDNS ddns-go
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES acme-acmesh acme-common luci-app-acme luci-i18n-acme-zh-cn"
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES ddns-go luci-app-ddns-go luci-i18n-ddns-go-zh-cn"
-# 【2026-11-23 用户定】adblock 只做**包级保护**、不做任何配置：固件装 adblock /
-# luci-app-adblock / luci-i18n-adblock-zh-cn 三件，屏蔽表、feed、DNS 对接一律不预置，
-# 要用的人在 LuCI 里自己开（出厂默认 disabled）。
-# 这条链是 i18n → luci-app-adblock → adblock，写一行三个全装。
-CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-adblock-zh-cn"
+# 【2026-11-23 用户定】adblock 整套不装（列表、feed、DNS 对接全不预置）。
+# 但它的 10 项依赖（ca-bundle / coreutils / coreutils-sort / firewall4 / gawk /
+# jshn / jsonfilter / libc / rpcd / rpcd-mod-rpcsys）全部留在包里，要用的人
+# 装了 adblock 也不会缺依赖。
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-i18n-aria2-zh-cn"
 # 【2026-11-02】banip 移除（用户定：用不到）。
 # 当日 201 实测：三个包都在、init.d 是 ENABLED，但 option ban_enabled '0'、
