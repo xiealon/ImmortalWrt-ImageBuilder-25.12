@@ -1524,7 +1524,9 @@ if [ -n "$_IB_PKGS" ] && [ -d "$_IB_PKGS/official" ]; then
         # kmod-ip6-vti 也是 6.12.103-r1，但依赖 kernel=71cc20e3；apk 求解时挑了上游那份，
         # 于是 kernel-26ed 被判 breaks，第一次 make image 必失败（run #166/#168/#173）。
         # 与其白跑一轮再剔，这里直接不放进清单。
-        _ak_km_skip="kmod-ip6-vti"
+        # 官方同名包会抢走求解的（版本号相同、内核 hash 不同）
+        # + 同 .ko 互斥变体（装了会互相覆盖同一 .ko，必冲突；只留主流那份）
+        _ak_km_skip="kmod-ip6-vti kmod-ath10k-ct kmod-ath10k-ct-smallbuffers kmod-ath10k-smallbuffers kmod-usb-net-rtl8152-vendor"
         for _s in $_ak_km_skip; do
             case " $_ak_km_all " in
             *" $_s "*)
