@@ -1119,6 +1119,22 @@ for _ak_pat in luci-app-partexp-*.apk luci-app-taskplan-*.apk \
     done
 done
 echo "==> [apk-cache] 来源 C4（partexp/taskplan）：补拷 $_ak_c4 个 apk"
+
+# ---- 【2026-11-23 用户定】来源 C3'：官方 kmod 整批收进本地库 ----
+# 改走官方 ImageBuilder 后，packages/ 里的 kmod 与内核（71cc20e3）天生配套，
+# 可以整批拷进 /rom/root/apk-cache：被 apk del 掉之后，开机 --repair 能离线装回来
+# （_pa_missing_kmods 用文件名对照），既不用联网，也不会像自建那套装错 kernel hash。
+_ak_c3o=0
+for _f in packages/kmod-*.apk; do
+    [ -f "$_f" ] || continue
+    _n="${_f##*/}"
+    [ -e "$_AK_DIR/$_n" ] && continue
+    cp -f "$_f" "$_AK_DIR"/ && _ak_c3o=$((_ak_c3o + 1))
+done
+echo "==> [apk-cache] 来源 C3'（官方 kmod）：收 $_ak_c3o 个 apk"
+if [ "$_ak_c3o" -lt 100 ]; then
+    echo "::warning::[apk-cache] 来源 C3' 只收到 $_ak_c3o 个官方 kmod（预期 1000+），本地库缺内核模块"
+fi
 for _ak_w4 in luci-app-partexp luci-app-taskplan; do
     ls "$_AK_DIR/$_ak_w4"-[0-9]*.apk >/dev/null 2>&1 \
         || echo "::warning::库里仍缺 $_ak_w4（开机补充组装不回它）"
@@ -1476,7 +1492,7 @@ if [ -n "$_AK_BIN" ] && [ -n "$_AK_IDX" ] && [ -d "$_IB_PKGS" ]; then
     # 索引收录数必须对得上：少了就是链接没建成，make image 会在装机阶段才炸
     _ib_in=$(echo $_ib_list | wc -w)
     echo "==> [ib-pkgs] 索引收录 $_ib_in 个包（run $_ib_n + official $_ib_o）"
-    if [ "$_ib_in" -lt 1300 ]; then
+    if [ -d "$_IB_PKGS/official" ] && [ "$_ib_in" -lt 1300 ]; then
         echo "::error::索引只收了 $_ib_in 个包（预期 1380 左右），符号链接或索引生成有问题"
         exit 1
     fi
