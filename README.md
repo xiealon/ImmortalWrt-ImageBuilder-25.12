@@ -1,4 +1,4 @@
-# ImmortalWrt-ImageBuilder-25.12-daed
+# ImmortalWrt-ImageBuilder-25.12
 
 # 特殊提示:
 若未在action的enroll处填入key
